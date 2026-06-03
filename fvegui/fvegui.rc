@@ -1,0 +1,230 @@
+#include <winres.h>
+#include "resource.h"
+
+#pragma code_page(65001)
+
+IDI_FVEGUI_APP ICON "app.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "A1ive"
+            VALUE "FileDescription", "FVEUnlocker"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "fvegui"
+            VALUE "OriginalFilename", "fvegui.exe"
+            VALUE "ProductName", "FVEUnlocker"
+            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "LegalCopyright", "Copyright (c) 2026 A1ive"
+        END
+        BLOCK "080404B0"
+        BEGIN
+            VALUE "CompanyName", "A1ive"
+            VALUE "FileDescription", "FVEUnlocker"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "fvegui"
+            VALUE "OriginalFilename", "fvegui.exe"
+            VALUE "ProductName", "FVEUnlocker"
+            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "LegalCopyright", "Copyright (c) 2026 A1ive"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200, 0x0804, 1200
+    END
+END
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+STRINGTABLE
+BEGIN
+    IDS_APP_TITLE "FVEUnlocker"
+    IDS_VOLUME_LABEL "Volume:"
+    IDS_REFRESH_BUTTON "Refresh"
+    IDS_SECRET_LABEL "Unlock key:"
+    IDS_RECOVERY_CHECK "Recovery key"
+    IDS_UNLOCK_BUTTON "Unlock"
+    IDS_LOCK_BUTTON "Lock"
+    IDS_TURN_OFF_BUTTON "Turn off BitLocker"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_VOLUME_FULLY_DECRYPTED "Fully decrypted"
+    IDS_VOLUME_FULLY_ENCRYPTED "Fully encrypted"
+    IDS_VOLUME_ENCRYPTION_IN_PROGRESS "Encryption in progress"
+    IDS_VOLUME_DECRYPTION_IN_PROGRESS "Decryption in progress"
+    IDS_VOLUME_ENCRYPTION_PAUSED "Encryption paused"
+    IDS_VOLUME_DECRYPTION_PAUSED "Decryption paused"
+    IDS_UNKNOWN "Unknown"
+    IDS_PROTECTION_OFF "Off"
+    IDS_PROTECTION_ON "On"
+    IDS_LOCK_UNLOCKED "Unlocked"
+    IDS_LOCK_LOCKED "Locked"
+    IDS_DRIVE_REMOVABLE "Removable"
+    IDS_DRIVE_FIXED "Fixed"
+    IDS_DRIVE_NETWORK "Network"
+    IDS_DRIVE_CDROM "CD-ROM"
+    IDS_DRIVE_RAMDISK "RAM disk"
+    IDS_DRIVE_NO_ROOT "No root"
+    IDS_NO_LABEL "(no label)"
+    IDS_UNKNOWN_FS "unknown fs"
+    IDS_STATUS_UNAVAILABLE_SHORT "status unavailable"
+    IDS_NO_VOLUME_SELECTED "No volume selected."
+    IDS_UNKNOWN_PARENS "(unknown)"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  %s  %s  %u%%"
+    IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT "%s  %s  %s  status unavailable"
+    IDS_STATUS_UNAVAILABLE_FORMAT "Volume:       %s\r\nLabel:        %s\r\nDrive type:   %s\r\nStatus:       unavailable\r\nError:        %s\r\n"
+    IDS_STATUS_AVAILABLE_FORMAT "Volume:       %s\r\nLabel:        %s\r\nDrive type:   %s\r\n\r\nVolume state: %s\r\nProtection:   %s\r\nLock state:   %s\r\nFlags:        0x%08lX\r\n"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_OPERATION_FAILED_FORMAT "%s failed.\r\n\r\n%s"
+    IDS_OPERATION_FAILED_TITLE "BitLocker operation failed"
+    IDS_HRESULT_FORMAT "hr=0x%08lX (%s)"
+    IDS_HRESULT_WITH_MESSAGE_FORMAT "hr=0x%08lX (%s): %s"
+    IDS_REFRESHING_VOLUMES "Refreshing volumes..."
+    IDS_NO_VOLUMES_FOUND "No actionable BitLocker volumes were found."
+    IDS_NOT_ELEVATED "Not elevated. Lock and turn-off operations may require administrator rights."
+    IDS_READY "Ready."
+    IDS_MISSING_KEY_MESSAGE "Enter a password or recovery key first."
+    IDS_MISSING_KEY_TITLE "Missing key"
+    IDS_UNLOCKING_VOLUME "Unlocking volume..."
+    IDS_UNLOCK_FAILED "Unlock failed."
+    IDS_VOLUME_UNLOCKED "Volume unlocked."
+    IDS_CONFIRM_LOCK_MESSAGE "Lock the selected BitLocker volume?"
+    IDS_CONFIRM_LOCK_TITLE "Confirm lock"
+    IDS_LOCKING_VOLUME "Locking volume..."
+    IDS_LOCK_FAILED "Lock failed."
+    IDS_VOLUME_LOCKED "Volume locked."
+    IDS_UNLOCK_BEFORE_TURN_OFF_MESSAGE "Unlock the volume before turning off BitLocker."
+    IDS_VOLUME_LOCKED_TITLE "Volume locked"
+    IDS_ALREADY_DECRYPTED_MESSAGE "The selected volume is already fully decrypted."
+    IDS_BITLOCKER_TITLE "BitLocker"
+    IDS_DECRYPTION_IN_PROGRESS_MESSAGE "BitLocker decryption is already in progress."
+    IDS_CONFIRM_TURN_OFF_MESSAGE "Turn off BitLocker for the selected volume?\r\n\r\nThis starts full-volume decryption and may take a long time."
+    IDS_CONFIRM_TURN_OFF_TITLE "Confirm BitLocker turn off"
+    IDS_STARTING_DECRYPTION "Starting decryption..."
+    IDS_TURN_OFF_FAILED "Turn off failed."
+    IDS_DECRYPTION_STARTED "BitLocker decryption started."
+END
+
+STRINGTABLE
+BEGIN
+    IDS_OPERATION_UNLOCK "Unlock"
+    IDS_OPERATION_LOCK "Lock"
+    IDS_OPERATION_TURN_OFF "Turn off BitLocker"
+    IDS_OPERATION_INIT_API "Initialize BitLocker API"
+    IDS_OPERATION_REGISTER_CLASS "Register window class"
+    IDS_OPERATION_CREATE_WINDOW "Create main window"
+END
+
+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
+
+STRINGTABLE
+BEGIN
+    IDS_APP_TITLE "FVEUnlocker"
+    IDS_VOLUME_LABEL "卷:"
+    IDS_REFRESH_BUTTON "刷新"
+    IDS_SECRET_LABEL "解锁密钥:"
+    IDS_RECOVERY_CHECK "恢复密钥"
+    IDS_UNLOCK_BUTTON "解锁"
+    IDS_LOCK_BUTTON "锁定"
+    IDS_TURN_OFF_BUTTON "关闭 BitLocker"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_VOLUME_FULLY_DECRYPTED "已完全解密"
+    IDS_VOLUME_FULLY_ENCRYPTED "已完全加密"
+    IDS_VOLUME_ENCRYPTION_IN_PROGRESS "正在加密"
+    IDS_VOLUME_DECRYPTION_IN_PROGRESS "正在解密"
+    IDS_VOLUME_ENCRYPTION_PAUSED "加密已暂停"
+    IDS_VOLUME_DECRYPTION_PAUSED "解密已暂停"
+    IDS_UNKNOWN "未知"
+    IDS_PROTECTION_OFF "关闭"
+    IDS_PROTECTION_ON "开启"
+    IDS_LOCK_UNLOCKED "已解锁"
+    IDS_LOCK_LOCKED "已锁定"
+    IDS_DRIVE_REMOVABLE "可移动"
+    IDS_DRIVE_FIXED "固定"
+    IDS_DRIVE_NETWORK "网络"
+    IDS_DRIVE_CDROM "CD-ROM"
+    IDS_DRIVE_RAMDISK "RAM 磁盘"
+    IDS_DRIVE_NO_ROOT "无根目录"
+    IDS_NO_LABEL "(无标签)"
+    IDS_UNKNOWN_FS "未知文件系统"
+    IDS_STATUS_UNAVAILABLE_SHORT "状态不可用"
+    IDS_NO_VOLUME_SELECTED "未选择卷。"
+    IDS_UNKNOWN_PARENS "(未知)"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  %s  %s  %u%%"
+    IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT "%s  %s  %s  状态不可用"
+    IDS_STATUS_UNAVAILABLE_FORMAT "卷:           %s\r\n标签:         %s\r\n驱动器类型:   %s\r\n状态:         不可用\r\n错误:         %s\r\n"
+    IDS_STATUS_AVAILABLE_FORMAT "卷:           %s\r\n标签:         %s\r\n驱动器类型:   %s\r\n\r\n卷状态:       %s\r\n保护:         %s\r\n锁定状态:     %s\r\n标志:         0x%08lX\r\n"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_OPERATION_FAILED_FORMAT "%s 失败。\r\n\r\n%s"
+    IDS_OPERATION_FAILED_TITLE "BitLocker 操作失败"
+    IDS_HRESULT_FORMAT "hr=0x%08lX (%s)"
+    IDS_HRESULT_WITH_MESSAGE_FORMAT "hr=0x%08lX (%s): %s"
+    IDS_REFRESHING_VOLUMES "正在刷新卷..."
+    IDS_NO_VOLUMES_FOUND "未找到需要操作的 BitLocker 卷。"
+    IDS_NOT_ELEVATED "当前未以管理员权限运行，锁定和关闭 BitLocker 可能需要管理员权限。"
+    IDS_READY "就绪。"
+    IDS_MISSING_KEY_MESSAGE "请先输入密码或恢复密钥。"
+    IDS_MISSING_KEY_TITLE "缺少密钥"
+    IDS_UNLOCKING_VOLUME "正在解锁卷..."
+    IDS_UNLOCK_FAILED "解锁失败。"
+    IDS_VOLUME_UNLOCKED "卷已解锁。"
+    IDS_CONFIRM_LOCK_MESSAGE "要锁定选中的 BitLocker 卷吗?"
+    IDS_CONFIRM_LOCK_TITLE "确认锁定"
+    IDS_LOCKING_VOLUME "正在锁定卷..."
+    IDS_LOCK_FAILED "锁定失败。"
+    IDS_VOLUME_LOCKED "卷已锁定。"
+    IDS_UNLOCK_BEFORE_TURN_OFF_MESSAGE "关闭 BitLocker 前请先解锁该卷。"
+    IDS_VOLUME_LOCKED_TITLE "卷已锁定"
+    IDS_ALREADY_DECRYPTED_MESSAGE "选中的卷已经完全解密。"
+    IDS_BITLOCKER_TITLE "BitLocker"
+    IDS_DECRYPTION_IN_PROGRESS_MESSAGE "BitLocker 解密已经在进行中。"
+    IDS_CONFIRM_TURN_OFF_MESSAGE "要关闭选中卷的 BitLocker 吗?\r\n\r\n这会开始全卷解密，可能需要较长时间。"
+    IDS_CONFIRM_TURN_OFF_TITLE "确认关闭 BitLocker"
+    IDS_STARTING_DECRYPTION "正在启动解密..."
+    IDS_TURN_OFF_FAILED "关闭失败。"
+    IDS_DECRYPTION_STARTED "BitLocker 解密已启动。"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_OPERATION_UNLOCK "解锁"
+    IDS_OPERATION_LOCK "锁定"
+    IDS_OPERATION_TURN_OFF "关闭 BitLocker"
+    IDS_OPERATION_INIT_API "初始化 BitLocker API"
+    IDS_OPERATION_REGISTER_CLASS "注册窗口类"
+    IDS_OPERATION_CREATE_WINDOW "创建主窗口"
+END
