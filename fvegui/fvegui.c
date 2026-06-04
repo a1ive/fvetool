@@ -545,8 +545,7 @@ static void FormatSelectedVolumeStatus(const FVE_GUI_VOLUME_ENTRY* volume, PWSTR
 		L"\r\n"
 		L"Volume state: %s\r\n"
 		L"Protection:   %s\r\n"
-		L"Lock state:   %s\r\n"
-		L"Flags:        0x%08lX\r\n");
+		L"Lock state:   %s\r\n");
 	StringCchPrintfW(
 		output,
 		cchOutput,
@@ -556,8 +555,7 @@ static void FormatSelectedVolumeStatus(const FVE_GUI_VOLUME_ENTRY* volume, PWSTR
 		DriveTypeText(volume->DriveType),
 		VolumeStatusText(volume->Info.VolumeStatus),
 		ProtectionStatusText(volume->Info.ProtectionStatus),
-		LockStatusText(volume->Info.LockStatus),
-		(unsigned long)volume->Info.EncryptionFlags);
+		LockStatusText(volume->Info.LockStatus));
 }
 
 static void RefreshStatusText(FVE_GUI_APP* app)

@@ -43,12 +43,7 @@ typedef struct FVE_GET_STATUS_OUTPUT
 	double PercentComplete;
 	BYTE Reserved2[0x20];
 	DWORD ProtectionStatus;
-	BYTE Reserved3[0x14];
-	ULONGLONG VolumeSize;
-	ULONGLONG EncryptedSize;
-	BYTE Reserved4[0x10];
-	DWORD EncryptionFlags;
-	BYTE Reserved5[0x0C];
+	BYTE Reserved3[0x44];
 } FVE_GET_STATUS_OUTPUT;
 
 _Static_assert(sizeof(FVE_GET_STATUS_OUTPUT) == FVE_LIB_STATUS_OUTPUT_SIZE, "FVE_GET_STATUS_OUTPUT must be 0x80 bytes");
@@ -105,11 +100,6 @@ static PFN_FveAuthElementFromPassPhraseW gFveAuthElementFromPassPhraseW;
 static PFN_FveAuthElementFromRecoveryPasswordW gFveAuthElementFromRecoveryPasswordW;
 static PFN_InternalFveIsVolumeEncrypted gInternalFveIsVolumeEncrypted;
 
-static HRESULT ProcNotFound(void)
-{
-	return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
-}
-
 static HRESULT EnsureInitialized(void)
 {
 	if (gFveApiDll != NULL)
@@ -122,7 +112,7 @@ static HRESULT LoadRequiredProc(FARPROC* target, const char* name)
 {
 	FARPROC proc = GetProcAddress(gFveApiDll, name);
 	if (proc == NULL)
-		return ProcNotFound();
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 
 	*target = proc;
 	return S_OK;
@@ -175,31 +165,12 @@ static HRESULT CopyTrimmed(PCWSTR input, PWSTR output, size_t cchOutput)
 	return S_OK;
 }
 
-static WCHAR ToUpperAsciiW(WCHAR ch)
-{
-	if (ch >= L'a' && ch <= L'z')
-		return (WCHAR)(ch - (L'a' - L'A'));
-	return ch;
-}
-
-static BOOL IsAsciiAlphaW(WCHAR ch)
-{
-	return (ch >= L'A' && ch <= L'Z') || (ch >= L'a' && ch <= L'z');
-}
-
-static BOOL IsAsciiHexDigitW(WCHAR ch)
-{
-	return (ch >= L'0' && ch <= L'9') ||
-		(ch >= L'A' && ch <= L'F') ||
-		(ch >= L'a' && ch <= L'f');
-}
-
 static HRESULT SetDrivePath(WCHAR letter, PWSTR output, size_t cchOutput)
 {
 	if (output == NULL || cchOutput < 3)
 		return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
 
-	output[0] = ToUpperAsciiW(letter);
+	output[0] = towupper(letter);
 	output[1] = L':';
 	output[2] = L'\0';
 	return S_OK;
@@ -207,7 +178,7 @@ static HRESULT SetDrivePath(WCHAR letter, PWSTR output, size_t cchOutput)
 
 static BOOL IsDrivePath(PCWSTR path)
 {
-	return path != NULL && IsAsciiAlphaW(path[0]) && path[1] == L':' && path[2] == L'\0';
+	return path != NULL && iswalpha(path[0]) && path[1] == L':' && path[2] == L'\0';
 }
 
 static BOOL IsRawGuidString(PCWSTR text)
@@ -223,7 +194,7 @@ static BOOL IsRawGuidString(PCWSTR text)
 		{
 			if (text[i] != L'-')
 				return FALSE;
-		} else if (!IsAsciiHexDigitW(text[i])) {
+		} else if (!iswxdigit(text[i])) {
 			return FALSE;
 		}
 	}
@@ -331,9 +302,6 @@ static void VolumeInfoFromOutput(const FVE_GET_STATUS_OUTPUT* output, FVE_LIB_VO
 	volumeInfo->ProtectionStatus = ProtectionStatusFromRaw(output->ProtectionStatus);
 	volumeInfo->LockStatus = LockStatusFromRaw(output->ProtectionStatus);
 	volumeInfo->EncryptionPercentage = PercentToByte(output->PercentComplete);
-	volumeInfo->EncryptionFlags = output->EncryptionFlags;
-	volumeInfo->VolumeSize = output->VolumeSize;
-	volumeInfo->EncryptedSize = output->EncryptedSize;
 }
 
 static BOOL IsNotEncryptedStatusHr(HRESULT hr)
@@ -499,7 +467,7 @@ static HRESULT CreatePassphraseAuth(PCWSTR password, FVE_AUTH_ELEMENT* authEleme
 	if (password == NULL || authElement == NULL)
 		return E_INVALIDARG;
 	if (gFveAuthElementFromPassPhraseW == NULL)
-		return ProcNotFound();
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 
 	InitAuthElement(authElement, FVE_LIB_SECRET_TYPE_PASSPHRASE);
 	hr = gFveAuthElementFromPassPhraseW(password, authElement);
@@ -518,7 +486,7 @@ static HRESULT CreateRecoveryAuth(PCWSTR recoveryPassword, FVE_AUTH_ELEMENT* aut
 	if (recoveryPassword == NULL || authElement == NULL)
 		return E_INVALIDARG;
 	if (gFveAuthElementFromRecoveryPasswordW == NULL)
-		return ProcNotFound();
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 
 	hr = FveLibFormatRecoveryPassword(recoveryPassword, formatted, ARRAYSIZE(formatted));
 	if (SUCCEEDED(hr))
@@ -569,7 +537,7 @@ static HRESULT UnlockWithSecret(HANDLE volumeHandle, PCWSTR secret, DWORD secret
 		if (closeAfterUnlock)
 		{
 			if (gFveCloseVolumeForUnlock == NULL)
-				return ProcNotFound();
+				return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 			hr = gFveCloseVolumeForUnlock(volumeHandle, &unlockSettings, 0, secretType);
 			if (SUCCEEDED(hr) && closed != NULL)
 				*closed = TRUE;
@@ -580,7 +548,7 @@ static HRESULT UnlockWithSecret(HANDLE volumeHandle, PCWSTR secret, DWORD secret
 	}
 
 	if (gFveUnlockVolume == NULL)
-		return ProcNotFound();
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 
 	return gFveUnlockVolume(volumeHandle, &authElement);
 }
@@ -737,10 +705,10 @@ HRESULT FveLibNormalizeVolumePath(PCWSTR volumePath, PWSTR normalizedPath, size_
 
 	if (trimmed[0] == L'\\' && trimmed[1] == L'\\' &&
 		(trimmed[2] == L'.' || trimmed[2] == L'?') && trimmed[3] == L'\\' &&
-		IsAsciiAlphaW(trimmed[4]) && trimmed[5] == L':')
+		iswalpha(trimmed[4]) && trimmed[5] == L':')
 		return SetDrivePath(trimmed[4], normalizedPath, cchNormalizedPath);
 
-	if (IsAsciiAlphaW(trimmed[0]))
+	if (iswalpha(trimmed[0]))
 	{
 		if (trimmed[1] == L':' || trimmed[1] == L'\0')
 			return SetDrivePath(trimmed[0], normalizedPath, cchNormalizedPath);
@@ -918,7 +886,7 @@ HRESULT FveLibStartEncryption(HANDLE volumeHandle)
 	if (FAILED(hr))
 		return hr;
 	if (gFveConversionEncrypt == NULL)
-		return ProcNotFound();
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 
 	return gFveConversionEncrypt(volumeHandle);
 }
@@ -934,7 +902,7 @@ HRESULT FveLibStartEncryptionEx(HANDLE volumeHandle, DWORD flags)
 	if (FAILED(hr))
 		return hr;
 	if (gFveConversionEncryptEx == NULL)
-		return ProcNotFound();
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 
 	return gFveConversionEncryptEx(volumeHandle, flags);
 }
