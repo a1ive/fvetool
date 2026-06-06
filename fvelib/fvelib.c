@@ -18,6 +18,7 @@
 
 #include "fvelib.h"
 
+#include <stddef.h>
 #include <string.h>
 #include <wctype.h>
 
@@ -29,7 +30,11 @@
 #define FVE_LIB_AUTH_MAGIC_RECOVERY_PASSWORD 32
 #define FVE_LIB_SECRET_TYPE_PASSPHRASE 0x00800000u
 #define FVE_LIB_SECRET_TYPE_RECOVERY_PASSWORD 0x00080000u
-#define FVE_LIB_UNLOCK_SETTINGS_SIZE 56u
+#if defined(_WIN64)
+#define FVE_LIB_UNLOCK_SETTINGS_SIZE 0x38u
+#else
+#define FVE_LIB_UNLOCK_SETTINGS_SIZE 0x30u
+#endif
 #define FVE_LIB_UNLOCK_SETTINGS_VERSION 1u
 #define FVE_LIB_HRESULT_NOT_SUPPORTED ((HRESULT)0x80310001u)
 #define FVE_LIB_HRESULT_NOT_ENCRYPTED ((HRESULT)0x80310008u)
@@ -65,12 +70,21 @@ typedef struct FVE_UNLOCK_SETTINGS
 	DWORD SecretType;
 	DWORD AuthElementCount;
 	FVE_AUTH_ELEMENT** AuthElements;
-	PVOID Reserved;
+#if defined(_WIN64)
+	UINT64 Reserved;
+#else
+	DWORD ReservedPointerPadding;
+	UINT64 Reserved;
+#endif
+	BYTE ReservedTail[FVE_LIB_UNLOCK_SETTINGS_SIZE - 0x20u];
 } FVE_UNLOCK_SETTINGS;
+
+_Static_assert(offsetof(FVE_UNLOCK_SETTINGS, AuthElements) == 0x10, "FVE_UNLOCK_SETTINGS AuthElements offset must be 0x10");
+_Static_assert(offsetof(FVE_UNLOCK_SETTINGS, Reserved) == 0x18, "FVE_UNLOCK_SETTINGS Reserved offset must be 0x18");
+_Static_assert(sizeof(FVE_UNLOCK_SETTINGS) == FVE_LIB_UNLOCK_SETTINGS_SIZE, "FVE_UNLOCK_SETTINGS size mismatch");
 
 typedef HRESULT(WINAPI* PFN_FveOpenVolumeW)(LPCWSTR volumePath, DWORD accessMode, HANDLE* volumeHandle);
 typedef HRESULT(WINAPI* PFN_FveCloseVolume)(HANDLE volumeHandle);
-typedef HRESULT(WINAPI* PFN_FveCloseVolumeForUnlock)(HANDLE volumeHandle, FVE_UNLOCK_SETTINGS* unlockSettings, DWORD flags, DWORD secretType);
 typedef HRESULT(WINAPI* PFN_FveGetStatusW)(LPCWSTR volumePath, FVE_GET_STATUS_OUTPUT* statusInfo);
 typedef HRESULT(WINAPI* PFN_FveGetStatus)(HANDLE volumeHandle, FVE_GET_STATUS_OUTPUT* statusInfo);
 typedef HRESULT(WINAPI* PFN_FveUnlockVolume)(HANDLE volumeHandle, PVOID authElement);
@@ -89,7 +103,6 @@ typedef struct FVE_API
 	HMODULE ApiDll;
 	PFN_FveOpenVolumeW OpenVolumeW;
 	PFN_FveCloseVolume CloseVolume;
-	PFN_FveCloseVolumeForUnlock CloseVolumeForUnlock;
 	PFN_FveGetStatusW GetStatusW;
 	PFN_FveGetStatus GetStatus;
 	PFN_FveUnlockVolume UnlockVolume;
@@ -413,7 +426,7 @@ static void InitUnlockSettings(FVE_UNLOCK_SETTINGS* unlockSettings, DWORD secret
 	unlockSettings->SecretType = secretType;
 	unlockSettings->AuthElementCount = 1;
 	unlockSettings->AuthElements = authElements;
-	unlockSettings->Reserved = NULL;
+	unlockSettings->Reserved = 0;
 }
 
 static HRESULT CreatePassphraseAuth(PCWSTR password, FVE_AUTH_ELEMENT* authElement)
@@ -459,15 +472,13 @@ static HRESULT CreateAuthElement(PCWSTR secret, DWORD secretType, FVE_AUTH_ELEME
 	return CreatePassphraseAuth(secret, authElement);
 }
 
-static HRESULT UnlockWithSecret(HANDLE volumeHandle, PCWSTR secret, DWORD secretType, BOOL closeAfterUnlock, BOOL* closed)
+static HRESULT UnlockWithSecret(HANDLE volumeHandle, PCWSTR secret, DWORD secretType)
 {
 	FVE_AUTH_ELEMENT authElement;
 	FVE_AUTH_ELEMENT* authElementPointer = &authElement;
 	FVE_UNLOCK_SETTINGS unlockSettings;
 	HRESULT hr;
 
-	if (closed != NULL)
-		*closed = FALSE;
 	if (volumeHandle == NULL || secret == NULL || secret[0] == L'\0')
 		return E_INVALIDARG;
 
@@ -479,18 +490,7 @@ static HRESULT UnlockWithSecret(HANDLE volumeHandle, PCWSTR secret, DWORD secret
 	{
 		InitUnlockSettings(&unlockSettings, secretType, &authElementPointer);
 		hr = gFve.UnlockVolumeWithAccessMode(volumeHandle, &unlockSettings, 0);
-		if (FAILED(hr))
-			return hr;
-
-		if (closeAfterUnlock)
-		{
-			hr = gFve.CloseVolumeForUnlock(volumeHandle, &unlockSettings, 0, secretType);
-			if (SUCCEEDED(hr) && closed != NULL)
-				*closed = TRUE;
-			return hr;
-		}
-
-		return S_OK;
+		return hr;
 	}
 
 	return gFve.UnlockVolume(volumeHandle, &authElement);
@@ -499,7 +499,6 @@ static HRESULT UnlockWithSecret(HANDLE volumeHandle, PCWSTR secret, DWORD secret
 static HRESULT OpenUnlockClose(PCWSTR volumePath, PCWSTR secret, DWORD secretType)
 {
 	HANDLE volumeHandle = NULL;
-	BOOL closed = FALSE;
 	HRESULT hr = FveLibOpenVolume(volumePath, FVE_LIB_ACCESS_READ_ONLY, &volumeHandle);
 	HRESULT closeHr;
 
@@ -508,10 +507,7 @@ static HRESULT OpenUnlockClose(PCWSTR volumePath, PCWSTR secret, DWORD secretTyp
 	if (volumeHandle == NULL || volumeHandle == INVALID_HANDLE_VALUE)
 		return E_HANDLE;
 
-	hr = UnlockWithSecret(volumeHandle, secret, secretType, TRUE, &closed);
-	if (closed)
-		return hr;
-
+	hr = UnlockWithSecret(volumeHandle, secret, secretType);
 	closeHr = FveLibCloseVolume(volumeHandle);
 	if (FVE_LIB_FAILED(hr))
 		return hr;
@@ -582,7 +578,6 @@ HRESULT FveLibInit(void)
 		goto fail;
 
 	gFve.CloseVolume = (PFN_FveCloseVolume)closeProc;
-	gFve.CloseVolumeForUnlock = (PFN_FveCloseVolumeForUnlock)closeProc;
 	gFve.GetStatusW = (PFN_FveGetStatusW)GetProcAddress(gFve.ApiDll, "FveGetStatusW");
 	if (gFve.GetStatusW == NULL)
 		goto fail;
@@ -734,7 +729,7 @@ HRESULT FveLibUnlockWithPassword(HANDLE volumeHandle, PCWSTR password)
 	if (volumeHandle == NULL || password == NULL || password[0] == L'\0')
 		return E_INVALIDARG;
 
-	return UnlockWithSecret(volumeHandle, password, FVE_LIB_SECRET_TYPE_PASSPHRASE, FALSE, NULL);
+	return UnlockWithSecret(volumeHandle, password, FVE_LIB_SECRET_TYPE_PASSPHRASE);
 }
 
 HRESULT FveLibUnlockWithRecoveryPassword(HANDLE volumeHandle, PCWSTR recoveryPassword)
@@ -742,7 +737,7 @@ HRESULT FveLibUnlockWithRecoveryPassword(HANDLE volumeHandle, PCWSTR recoveryPas
 	if (volumeHandle == NULL || recoveryPassword == NULL || recoveryPassword[0] == L'\0')
 		return E_INVALIDARG;
 
-	return UnlockWithSecret(volumeHandle, recoveryPassword, FVE_LIB_SECRET_TYPE_RECOVERY_PASSWORD, FALSE, NULL);
+	return UnlockWithSecret(volumeHandle, recoveryPassword, FVE_LIB_SECRET_TYPE_RECOVERY_PASSWORD);
 }
 
 HRESULT FveLibUnlockWithPasswordByPath(PCWSTR volumePath, PCWSTR password)

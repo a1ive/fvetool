@@ -30,6 +30,8 @@
 
 static void PrintUsage(void)
 {
+	printf("Copyright (C) 2026  A1ive.\n");
+	printf("https://github.com/a1ive/fvetool\n");
 	printf("Usage:\n");
 	printf("  fvecli status <volume>\n");
 	printf("  fvecli unlock-password <volume> <password>\n");
