@@ -61,6 +61,7 @@ BEGIN
     IDS_UNLOCK_BUTTON "Unlock"
     IDS_LOCK_BUTTON "Lock"
     IDS_TURN_OFF_BUTTON "Turn off BitLocker"
+    IDS_STATUS_LABEL "Status:"
 END
 
 STRINGTABLE
@@ -91,8 +92,8 @@ END
 
 STRINGTABLE
 BEGIN
-    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  %s  %s"
-    IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT "%s  %s  %s  status unavailable"
+    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  |  %s  |  %s"
+    IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT "%s  %s  |  %s  |  status unavailable"
     IDS_STATUS_UNAVAILABLE_FORMAT "Volume:       %s\r\nLabel:        %s\r\nDrive type:   %s\r\nStatus:       unavailable\r\nError:        %s\r\n"
     IDS_STATUS_AVAILABLE_FORMAT "Volume:       %s\r\nLabel:        %s\r\nDrive type:   %s\r\n\r\nVolume state: %s\r\nProtection:   %s\r\nLock state:   %s\r\n"
 END
@@ -151,6 +152,7 @@ BEGIN
     IDS_UNLOCK_BUTTON "解锁"
     IDS_LOCK_BUTTON "锁定"
     IDS_TURN_OFF_BUTTON "关闭 BitLocker"
+    IDS_STATUS_LABEL "状态:"
 END
 
 STRINGTABLE
@@ -181,8 +183,8 @@ END
 
 STRINGTABLE
 BEGIN
-    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  %s  %s"
-    IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT "%s  %s  %s  状态不可用"
+    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  |  %s  |  %s"
+    IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT "%s  %s  |  %s  |  状态不可用"
     IDS_STATUS_UNAVAILABLE_FORMAT "卷:           %s\r\n标签:         %s\r\n驱动器类型:   %s\r\n状态:         不可用\r\n错误:         %s\r\n"
     IDS_STATUS_AVAILABLE_FORMAT "卷:           %s\r\n标签:         %s\r\n驱动器类型:   %s\r\n\r\n卷状态:       %s\r\n保护:         %s\r\n锁定状态:     %s\r\n"
 END

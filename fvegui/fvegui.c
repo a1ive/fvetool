@@ -26,6 +26,8 @@
 #include "../fvelib/fvelib.h"
 #include "resource.h"
 
+#pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+
 #define FVE_GUI_CLASS_NAME L"FveToolNativeGuiWindow"
 #define FVE_GUI_MAX_VOLUMES 32
 #define FVE_GUI_MAX_SECRET 2048
@@ -34,13 +36,13 @@
 
 #define IDC_VOLUME_COMBO 1001
 #define IDC_REFRESH_BUTTON 1002
-#define IDC_STATUS_EDIT 1003
 #define IDC_SECRET_EDIT 1004
 #define IDC_RECOVERY_CHECK 1005
 #define IDC_UNLOCK_BUTTON 1006
 #define IDC_LOCK_BUTTON 1007
 #define IDC_DECRYPT_BUTTON 1008
 #define IDC_MESSAGE_STATIC 1009
+#define IDC_STATUS_LABEL 1011
 
 typedef struct FVE_GUI_VOLUME_ENTRY
 {
@@ -65,6 +67,7 @@ typedef struct FVE_GUI_TEXT
 	WCHAR UnlockButton[64];
 	WCHAR LockButton[64];
 	WCHAR TurnOffButton[96];
+	WCHAR StatusLabel[64];
 } FVE_GUI_TEXT;
 
 typedef struct FVE_GUI_APP
@@ -74,13 +77,13 @@ typedef struct FVE_GUI_APP
 	HWND VolumeLabel;
 	HWND VolumeCombo;
 	HWND RefreshButton;
-	HWND StatusEdit;
 	HWND SecretLabel;
 	HWND SecretEdit;
 	HWND RecoveryCheck;
 	HWND UnlockButton;
 	HWND LockButton;
 	HWND DecryptButton;
+	HWND StatusLabel;
 	HWND MessageStatic;
 	HFONT Font;
 	BOOL Busy;
@@ -130,6 +133,7 @@ static void LoadGuiText(FVE_GUI_TEXT* text)
 	LOAD_TEXT(UnlockButton, IDS_UNLOCK_BUTTON, L"Unlock");
 	LOAD_TEXT(LockButton, IDS_LOCK_BUTTON, L"Lock");
 	LOAD_TEXT(TurnOffButton, IDS_TURN_OFF_BUTTON, L"Turn off BitLocker");
+	LOAD_TEXT(StatusLabel, IDS_STATUS_LABEL, L"Status:");
 
 #undef LOAD_TEXT
 }
@@ -559,10 +563,6 @@ static void FormatSelectedVolumeStatus(const FVE_GUI_VOLUME_ENTRY* volume, PWSTR
 
 static void RefreshStatusText(FVE_GUI_APP* app)
 {
-	WCHAR text[2048];
-
-	FormatSelectedVolumeStatus(GetSelectedVolume(app), text, ARRAYSIZE(text));
-	SetWindowTextW(app->StatusEdit, text);
 	UpdateButtons(app);
 }
 
@@ -806,63 +806,102 @@ static void LayoutControls(HWND window, FVE_GUI_APP* app)
 {
 	RECT client;
 	int margin;
+	int gap;
+	int contentLeft;
+	int contentWidth;
+	int maxContentWidth;
 	int labelWidth;
-	int buttonWidth;
+	int topRowHeight;
 	int buttonHeight;
 	int rowHeight;
 	int top;
 	int keyTop;
 	int buttonsTop;
 	int messageTop;
-	int statusTop;
-	int statusHeight;
+	int statusLabelWidth;
 	int clientWidth;
 	int clientHeight;
 	int comboWidth;
-	int secretWidth;
 	int recoveryWidth;
+	int refreshWidth;
+	int fieldLeft;
+	int rightColumnLeft;
+	int rightColumnWidth;
+	int unlockWidth;
+	int lockWidth;
+	int decryptWidth;
+	int actionLeft;
+	int actionAreaWidth;
+	int actionGap;
+	int actionTotalWidth;
 
 	GetClientRect(window, &client);
 	clientWidth = client.right - client.left;
 	clientHeight = client.bottom - client.top;
 
-	margin = ScaleForWindow(window, 12);
-	labelWidth = ScaleForWindow(window, 74);
-	buttonWidth = ScaleForWindow(window, 106);
-	buttonHeight = ScaleForWindow(window, 28);
-	rowHeight = ScaleForWindow(window, 28);
-	recoveryWidth = ScaleForWindow(window, 112);
+	margin = ScaleForWindow(window, 28);
+	gap = ScaleForWindow(window, 12);
+	labelWidth = ScaleForWindow(window, 92);
+	topRowHeight = ScaleForWindow(window, 24);
+	buttonHeight = ScaleForWindow(window, 30);
+	rowHeight = ScaleForWindow(window, 30);
+	rightColumnWidth = ScaleForWindow(window, 112);
+	recoveryWidth = rightColumnWidth;
+	refreshWidth = rightColumnWidth;
+	statusLabelWidth = ScaleForWindow(window, 56);
+	unlockWidth = ScaleForWindow(window, 112);
+	lockWidth = ScaleForWindow(window, 112);
+	decryptWidth = ScaleForWindow(window, 170);
+	actionGap = gap;
 
-	top = margin;
-	comboWidth = clientWidth - margin * 3 - labelWidth - buttonWidth;
-	if (comboWidth < ScaleForWindow(window, 180))
-		comboWidth = ScaleForWindow(window, 180);
+	contentWidth = clientWidth - margin * 2;
+	maxContentWidth = ScaleForWindow(window, 620);
+	if (contentWidth > maxContentWidth)
+	{
+		contentWidth = maxContentWidth;
+		contentLeft = (clientWidth - contentWidth) / 2;
+	} else {
+		contentLeft = margin;
+	}
 
-	MoveWindow(app->VolumeLabel, margin, top + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
-	MoveWindow(app->VolumeCombo, margin + labelWidth, top, comboWidth, ScaleForWindow(window, 240), TRUE);
-	MoveWindow(app->RefreshButton, margin + labelWidth + comboWidth + margin, top, buttonWidth, buttonHeight, TRUE);
+	top = ScaleForWindow(window, 28);
+	messageTop = clientHeight - margin - rowHeight;
+	buttonsTop = messageTop - ScaleForWindow(window, 30) - buttonHeight;
+	keyTop = buttonsTop - ScaleForWindow(window, 26) - rowHeight;
+	if (keyTop < top + topRowHeight + ScaleForWindow(window, 34))
+		keyTop = top + topRowHeight + ScaleForWindow(window, 34);
 
-	statusTop = top + rowHeight + margin;
-	messageTop = clientHeight - margin - ScaleForWindow(window, 20);
-	buttonsTop = messageTop - margin - buttonHeight;
-	keyTop = buttonsTop - margin - rowHeight;
-	statusHeight = keyTop - margin - statusTop;
-	if (statusHeight < ScaleForWindow(window, 120))
-		statusHeight = ScaleForWindow(window, 120);
+	MoveWindow(app->VolumeLabel, contentLeft, top + ScaleForWindow(window, 3), labelWidth, topRowHeight, TRUE);
 
-	MoveWindow(app->StatusEdit, margin, statusTop, clientWidth - margin * 2, statusHeight, TRUE);
+	fieldLeft = contentLeft + labelWidth;
+	rightColumnLeft = contentLeft + contentWidth - rightColumnWidth;
+	comboWidth = rightColumnLeft - gap - fieldLeft;
+	if (comboWidth < ScaleForWindow(window, 220))
+		comboWidth = ScaleForWindow(window, 220);
+	MoveWindow(app->VolumeCombo, fieldLeft, top, comboWidth, ScaleForWindow(window, 220), TRUE);
+	MoveWindow(app->RefreshButton, rightColumnLeft, top, refreshWidth, topRowHeight, TRUE);
 
-	MoveWindow(app->SecretLabel, margin, keyTop + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
-	secretWidth = clientWidth - margin * 4 - labelWidth - recoveryWidth;
-	if (secretWidth < ScaleForWindow(window, 180))
-		secretWidth = ScaleForWindow(window, 180);
-	MoveWindow(app->SecretEdit, margin + labelWidth, keyTop, secretWidth, buttonHeight, TRUE);
-	MoveWindow(app->RecoveryCheck, margin + labelWidth + secretWidth + margin, keyTop + ScaleForWindow(window, 2), recoveryWidth, rowHeight, TRUE);
+	MoveWindow(app->SecretLabel, contentLeft, keyTop + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
+	MoveWindow(app->SecretEdit, fieldLeft, keyTop, comboWidth, topRowHeight, TRUE);
+	MoveWindow(app->RecoveryCheck, rightColumnLeft, keyTop + ScaleForWindow(window, 2), recoveryWidth, rowHeight, TRUE);
 
-	MoveWindow(app->UnlockButton, margin + labelWidth, buttonsTop, buttonWidth, buttonHeight, TRUE);
-	MoveWindow(app->LockButton, margin + labelWidth + buttonWidth + margin, buttonsTop, buttonWidth, buttonHeight, TRUE);
-	MoveWindow(app->DecryptButton, margin + labelWidth + (buttonWidth + margin) * 2, buttonsTop, ScaleForWindow(window, 154), buttonHeight, TRUE);
-	MoveWindow(app->MessageStatic, margin, messageTop, clientWidth - margin * 2, ScaleForWindow(window, 22), TRUE);
+	actionLeft = fieldLeft;
+	actionAreaWidth = contentWidth - labelWidth;
+	actionTotalWidth = unlockWidth + lockWidth + decryptWidth + actionGap * 2;
+	if (actionTotalWidth > actionAreaWidth)
+	{
+		actionGap = ScaleForWindow(window, 8);
+		decryptWidth = actionAreaWidth - unlockWidth - lockWidth - actionGap * 2;
+		if (decryptWidth < ScaleForWindow(window, 142))
+			decryptWidth = ScaleForWindow(window, 142);
+	}
+
+	MoveWindow(app->UnlockButton, actionLeft, buttonsTop, unlockWidth, buttonHeight, TRUE);
+	MoveWindow(app->LockButton, actionLeft + unlockWidth + actionGap, buttonsTop, lockWidth, buttonHeight, TRUE);
+	MoveWindow(app->DecryptButton, actionLeft + unlockWidth + actionGap + lockWidth + actionGap, buttonsTop, decryptWidth, buttonHeight, TRUE);
+
+	MoveWindow(app->StatusLabel, contentLeft, messageTop + ScaleForWindow(window, 4), statusLabelWidth, rowHeight, TRUE);
+	MoveWindow(app->MessageStatic, contentLeft + statusLabelWidth, messageTop + ScaleForWindow(window, 4), contentWidth - statusLabelWidth, rowHeight, TRUE);
 }
 
 static BOOL CreateControls(FVE_GUI_APP* app)
@@ -871,25 +910,25 @@ static BOOL CreateControls(FVE_GUI_APP* app)
 	app->VolumeLabel = CreateChildWindow(app, L"STATIC", app->Text.VolumeLabel, 0, 0, -1);
 	app->VolumeCombo = CreateChildWindow(app, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, IDC_VOLUME_COMBO);
 	app->RefreshButton = CreateChildWindow(app, L"BUTTON", app->Text.RefreshButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_REFRESH_BUTTON);
-	app->StatusEdit = CreateChildWindow(app, L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, IDC_STATUS_EDIT);
 	app->SecretLabel = CreateChildWindow(app, L"STATIC", app->Text.SecretLabel, 0, 0, -1);
 	app->SecretEdit = CreateChildWindow(app, L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, IDC_SECRET_EDIT);
 	app->RecoveryCheck = CreateChildWindow(app, L"BUTTON", app->Text.RecoveryCheck, BS_AUTOCHECKBOX | WS_TABSTOP, 0, IDC_RECOVERY_CHECK);
 	app->UnlockButton = CreateChildWindow(app, L"BUTTON", app->Text.UnlockButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_UNLOCK_BUTTON);
 	app->LockButton = CreateChildWindow(app, L"BUTTON", app->Text.LockButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_LOCK_BUTTON);
 	app->DecryptButton = CreateChildWindow(app, L"BUTTON", app->Text.TurnOffButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_DECRYPT_BUTTON);
+	app->StatusLabel = CreateChildWindow(app, L"STATIC", app->Text.StatusLabel, 0, 0, IDC_STATUS_LABEL);
 	app->MessageStatic = CreateChildWindow(app, L"STATIC", L"", 0, 0, IDC_MESSAGE_STATIC);
 
 	return app->VolumeLabel != NULL &&
 		app->VolumeCombo != NULL &&
 		app->RefreshButton != NULL &&
-		app->StatusEdit != NULL &&
 		app->SecretLabel != NULL &&
 		app->SecretEdit != NULL &&
 		app->RecoveryCheck != NULL &&
 		app->UnlockButton != NULL &&
 		app->LockButton != NULL &&
 		app->DecryptButton != NULL &&
+		app->StatusLabel != NULL &&
 		app->MessageStatic != NULL;
 }
 
@@ -918,8 +957,8 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 	case WM_GETMINMAXINFO:
 	{
 		MINMAXINFO* minMax = (MINMAXINFO*)lParam;
-		minMax->ptMinTrackSize.x = ScaleForWindow(window, 620);
-		minMax->ptMinTrackSize.y = ScaleForWindow(window, 420);
+		minMax->ptMinTrackSize.x = ScaleForWindow(window, 560);
+		minMax->ptMinTrackSize.y = ScaleForWindow(window, 280);
 		return 0;
 	}
 	case WM_SETCURSOR:
@@ -935,6 +974,7 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 			HWND control = (HWND)lParam;
 			if (control == app->VolumeLabel ||
 				control == app->SecretLabel ||
+				control == app->StatusLabel ||
 				control == app->MessageStatic ||
 				control == app->RecoveryCheck)
 			{
@@ -1066,8 +1106,8 @@ wWinMain(_In_ HINSTANCE hInstance,
 		WS_OVERLAPPEDWINDOW,
 		CW_USEDEFAULT,
 		CW_USEDEFAULT,
-		ScaleForWindow(NULL, 760),
-		ScaleForWindow(NULL, 520),
+		ScaleForWindow(NULL, 700),
+		ScaleForWindow(NULL, 300),
 		NULL,
 		NULL,
 		hInstance,
