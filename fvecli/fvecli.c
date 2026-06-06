@@ -37,6 +37,7 @@ static void PrintUsage(void)
 	printf("  fvecli unlock-password <volume> <password>\n");
 	printf("  fvecli unlock-recovery <volume> <recovery-password>\n");
 	printf("  fvecli lock <volume> [--dismount]\n");
+	printf("  fvecli encrypt <volume> <password>\n");
 	printf("  fvecli decrypt <volume> [flags]\n");
 	printf("  fvecli off <volume> [flags]\n");
 	printf("\n");
@@ -44,6 +45,7 @@ static void PrintUsage(void)
 	printf("  fvecli status C:\n");
 	printf("  fvecli unlock-password D: my-password\n");
 	printf("  fvecli unlock-recovery D: 111111-222222-333333-444444-555555-666666-777777-888888\n");
+	printf("  fvecli encrypt M: my-password\n");
 	printf("  fvecli off D:\n");
 }
 
@@ -123,6 +125,18 @@ static void PrintVolumeInfo(const FVE_LIB_VOLUME_INFO* info)
 	printf("VolumeStatus:      %s (%lu)\n", FveLibVolumeStatusName(info->VolumeStatus), (unsigned long)info->VolumeStatus);
 	printf("ProtectionStatus:  %s (%lu)\n", FveLibProtectionStatusName(info->ProtectionStatus), (unsigned long)info->ProtectionStatus);
 	printf("LockStatus:        %s (%lu)\n", FveLibLockStatusName(info->LockStatus), (unsigned long)info->LockStatus);
+}
+
+static void PrintWideAscii(PCWSTR text)
+{
+	if (text == NULL)
+		return;
+
+	while (*text != L'\0')
+	{
+		putchar(*text <= 0x7f ? (int)*text : '?');
+		++text;
+	}
 }
 
 static int InitFveLib(void)
@@ -260,6 +274,43 @@ static int RunLock(const char* volumeArg, BOOL dismountFirst)
 	return 0;
 }
 
+static int RunEncrypt(const char* volumeArg, const char* passwordArg)
+{
+	PWSTR volume = NULL;
+	PWSTR password = NULL;
+	WCHAR recoveryPassword[FVE_LIB_RECOVERY_PASSWORD_CCH];
+	HRESULT hr;
+
+	hr = MbsToWide(volumeArg, &volume);
+	if (FAILED(hr))
+	{
+		PrintHr("MbsToWide(volume)", hr);
+		return 2;
+	}
+	hr = MbsToWide(passwordArg, &password);
+	if (FAILED(hr))
+	{
+		FreeWide(volume);
+		PrintHr("MbsToWide(password)", hr);
+		return 2;
+	}
+
+	hr = FveLibEncryptWithPasswordByPath(volume, password, recoveryPassword, ARRAYSIZE(recoveryPassword));
+	FreeWide(password);
+	FreeWide(volume);
+	if (FAILED(hr))
+	{
+		PrintHr("FveLibEncryptWithPasswordByPath", hr);
+		return 2;
+	}
+
+	printf("BitLocker encryption started.\n");
+	printf("RecoveryPassword: ");
+	PrintWideAscii(recoveryPassword);
+	printf("\n");
+	return 0;
+}
+
 static int RunDecrypt(const char* volumeArg, const char* flagsArg)
 {
 	PWSTR volume = NULL;
@@ -358,6 +409,15 @@ static int RunCommand(int argc, char* argv[])
 			dismountFirst = TRUE;
 		}
 		return RunLock(argv[2], dismountFirst);
+	}
+	if (_stricmp(command, "encrypt") == 0)
+	{
+		if (argc != 4)
+		{
+			PrintUsage();
+			return 1;
+		}
+		return RunEncrypt(argv[2], argv[3]);
 	}
 	if (_stricmp(command, "decrypt") == 0 || _stricmp(command, "off") == 0)
 	{

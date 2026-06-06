@@ -27,6 +27,7 @@
 #define FVE_LIB_HRESULT_VOLUME_LOCKED ((HRESULT)0x80310000u)
 #define FVE_LIB_HRESULT_IS_VOLUME_LOCKED(hr) ((DWORD)(HRESULT)(hr) == (DWORD)FVE_LIB_HRESULT_VOLUME_LOCKED)
 #define FVE_LIB_FAILED(hr) (FAILED(hr) && !FVE_LIB_HRESULT_IS_VOLUME_LOCKED(hr))
+#define FVE_LIB_RECOVERY_PASSWORD_CCH 56u
 
 #ifdef __cplusplus
 extern "C" {
@@ -95,6 +96,15 @@ HRESULT FveLibStartEncryption(HANDLE volumeHandle);
 HRESULT FveLibStartEncryptionEx(HANDLE volumeHandle, DWORD flags);
 HRESULT FveLibStartEncryptionByPath(PCWSTR volumePath);
 HRESULT FveLibStartEncryptionExByPath(PCWSTR volumePath, DWORD flags);
+
+HRESULT FveLibInitVolumeForEncryption(HANDLE volumeHandle);
+HRESULT FveLibAddPasswordProtector(HANDLE volumeHandle, PCWSTR password, GUID* protectorId);
+HRESULT FveLibAddRecoveryPasswordProtector(HANDLE volumeHandle, PCWSTR recoveryPassword, GUID* protectorId);
+HRESULT FveLibGenerateRecoveryPassword(PWSTR output, size_t cchOutput);
+HRESULT FveLibEncryptWithPassword(HANDLE volumeHandle, PCWSTR password, PWSTR recoveryPassword, size_t cchRecoveryPassword);
+HRESULT FveLibEncryptWithPasswordEx(HANDLE volumeHandle, PCWSTR password, DWORD flags, PWSTR recoveryPassword, size_t cchRecoveryPassword);
+HRESULT FveLibEncryptWithPasswordByPath(PCWSTR volumePath, PCWSTR password, PWSTR recoveryPassword, size_t cchRecoveryPassword);
+HRESULT FveLibEncryptWithPasswordExByPath(PCWSTR volumePath, PCWSTR password, DWORD flags, PWSTR recoveryPassword, size_t cchRecoveryPassword);
 
 HRESULT FveLibFormatRecoveryPassword(PCWSTR input, PWSTR output, size_t cchOutput);
 

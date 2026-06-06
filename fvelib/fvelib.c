@@ -30,6 +30,8 @@
 #define FVE_LIB_AUTH_MAGIC_RECOVERY_PASSWORD 32
 #define FVE_LIB_SECRET_TYPE_PASSPHRASE 0x00800000u
 #define FVE_LIB_SECRET_TYPE_RECOVERY_PASSWORD 0x00080000u
+#define FVE_LIB_ENCRYPTION_METHOD_AES_128 3u
+#define FVE_LIB_ENCRYPTION_METHOD_XTS_AES_128 6u
 #if defined(_WIN64)
 #define FVE_LIB_UNLOCK_SETTINGS_SIZE 0x38u
 #else
@@ -94,9 +96,16 @@ typedef HRESULT(WINAPI* PFN_FveConversionDecrypt)(HANDLE volumeHandle);
 typedef HRESULT(WINAPI* PFN_FveConversionDecryptEx)(HANDLE volumeHandle, DWORD flags);
 typedef HRESULT(WINAPI* PFN_FveConversionEncrypt)(HANDLE volumeHandle);
 typedef HRESULT(WINAPI* PFN_FveConversionEncryptEx)(HANDLE volumeHandle, DWORD flags);
+typedef HRESULT(WINAPI* PFN_FveInitVolumeEx)(HANDLE volumeHandle, PVOID context, DWORD flags);
+typedef HRESULT(WINAPI* PFN_FveAddAuthMethodInformation)(HANDLE volumeHandle, FVE_UNLOCK_SETTINGS* authMethod, GUID* protectorId);
+typedef HRESULT(WINAPI* PFN_FveCommitChanges)(HANDLE volumeHandle);
+typedef HRESULT(WINAPI* PFN_FveSetFveMethod)(HANDLE volumeHandle, DWORD method);
+typedef HRESULT(WINAPI* PFN_FveSetFveMethodEx)(HANDLE volumeHandle, DWORD method, DWORD arg2, DWORD arg3);
 typedef HRESULT(WINAPI* PFN_FveAuthElementFromPassPhraseW)(LPCWSTR passphrase, FVE_AUTH_ELEMENT* authElement);
 typedef HRESULT(WINAPI* PFN_FveAuthElementFromRecoveryPasswordW)(LPCWSTR recoveryPassword, FVE_AUTH_ELEMENT* authElement);
+typedef HRESULT(WINAPI* PFN_FveIsRecoveryPasswordValidW)(LPCWSTR recoveryPassword, BOOL* isValid);
 typedef HRESULT(WINAPI* PFN_InternalFveIsVolumeEncrypted)(HANDLE volumeHandle);
+typedef BOOLEAN(WINAPI* PFN_RtlGenRandom)(PVOID randomBuffer, ULONG randomBufferLength);
 
 typedef struct FVE_API
 {
@@ -112,8 +121,14 @@ typedef struct FVE_API
 	PFN_FveConversionDecryptEx ConversionDecryptEx;
 	PFN_FveConversionEncrypt ConversionEncrypt;
 	PFN_FveConversionEncryptEx ConversionEncryptEx;
+	PFN_FveInitVolumeEx InitVolumeEx;
+	PFN_FveAddAuthMethodInformation AddAuthMethodInformation;
+	PFN_FveCommitChanges CommitChanges;
+	PFN_FveSetFveMethod SetFveMethod;
+	PFN_FveSetFveMethodEx SetFveMethodEx;
 	PFN_FveAuthElementFromPassPhraseW AuthElementFromPassPhraseW;
 	PFN_FveAuthElementFromRecoveryPasswordW AuthElementFromRecoveryPasswordW;
+	PFN_FveIsRecoveryPasswordValidW IsRecoveryPasswordValidW;
 	PFN_InternalFveIsVolumeEncrypted InternalFveIsVolumeEncrypted;
 } FVE_API;
 
@@ -145,6 +160,68 @@ static HRESULT CopyTrimmed(PCWSTR input, PWSTR output, size_t cchOutput)
 		output[i] = start[i];
 	output[length] = L'\0';
 	return S_OK;
+}
+
+static HRESULT CopyWide(PCWSTR input, PWSTR output, size_t cchOutput)
+{
+	size_t length = 0;
+
+	if (input == NULL || output == NULL || cchOutput == 0)
+		return E_INVALIDARG;
+
+	while (input[length] != L'\0')
+		++length;
+
+	if (length + 1 > cchOutput)
+		return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+
+	for (size_t i = 0; i <= length; ++i)
+		output[i] = input[i];
+
+	return S_OK;
+}
+
+static HRESULT FillRandomBytes(PVOID buffer, ULONG bufferLength)
+{
+	HMODULE advapi;
+	PFN_RtlGenRandom rtlGenRandom;
+	DWORD error;
+
+	if (buffer == NULL || bufferLength == 0)
+		return E_INVALIDARG;
+
+	advapi = LoadLibraryW(L"advapi32.dll");
+	if (advapi == NULL)
+		return HRESULT_FROM_WIN32(GetLastError());
+
+	rtlGenRandom = (PFN_RtlGenRandom)GetProcAddress(advapi, "SystemFunction036");
+	if (rtlGenRandom == NULL)
+	{
+		error = GetLastError();
+		FreeLibrary(advapi);
+		return HRESULT_FROM_WIN32(error != 0 ? error : ERROR_PROC_NOT_FOUND);
+	}
+
+	if (!rtlGenRandom(buffer, bufferLength))
+	{
+		error = GetLastError();
+		FreeLibrary(advapi);
+		return HRESULT_FROM_WIN32(error != 0 ? error : ERROR_GEN_FAILURE);
+	}
+
+	FreeLibrary(advapi);
+	return S_OK;
+}
+
+static void WriteSixDigitGroup(DWORD value, PWSTR output)
+{
+	DWORD divisor = 100000u;
+
+	for (size_t i = 0; i < 6; ++i)
+	{
+		output[i] = (WCHAR)(L'0' + ((value / divisor) % 10u));
+		divisor /= 10u;
+	}
 }
 
 static HRESULT SetDrivePath(WCHAR letter, PWSTR output, size_t cchOutput)
@@ -429,6 +506,11 @@ static void InitUnlockSettings(FVE_UNLOCK_SETTINGS* unlockSettings, DWORD secret
 	unlockSettings->Reserved = 0;
 }
 
+static void InitAuthMethodInformation(FVE_UNLOCK_SETTINGS* authMethod, DWORD secretType, FVE_AUTH_ELEMENT** authElements)
+{
+	InitUnlockSettings(authMethod, secretType, authElements);
+}
+
 static HRESULT CreatePassphraseAuth(PCWSTR password, FVE_AUTH_ELEMENT* authElement)
 {
 	HRESULT hr;
@@ -556,6 +638,55 @@ static HRESULT WINAPI EncryptCallback(HANDLE volumeHandle, void* context)
 	return FveLibStartEncryption(volumeHandle);
 }
 
+typedef struct FVE_ENCRYPT_PASSWORD_CONTEXT
+{
+	PCWSTR Password;
+	DWORD Flags;
+	PWSTR RecoveryPassword;
+	size_t CchRecoveryPassword;
+} FVE_ENCRYPT_PASSWORD_CONTEXT;
+
+static HRESULT SetDefaultEncryptionMethod(HANDLE volumeHandle)
+{
+	HRESULT hr;
+
+	if (gFve.SetFveMethodEx != NULL)
+	{
+		hr = gFve.SetFveMethodEx(volumeHandle, FVE_LIB_ENCRYPTION_METHOD_XTS_AES_128, 1u, 1u);
+		if (SUCCEEDED(hr))
+			return S_OK;
+		if ((DWORD)hr != (DWORD)E_INVALIDARG && (DWORD)hr != (DWORD)FVE_LIB_HRESULT_NOT_SUPPORTED)
+			return hr;
+	}
+
+	if (gFve.SetFveMethod != NULL)
+	{
+		hr = gFve.SetFveMethod(volumeHandle, FVE_LIB_ENCRYPTION_METHOD_XTS_AES_128);
+		if (SUCCEEDED(hr))
+			return S_OK;
+		if ((DWORD)hr == (DWORD)E_INVALIDARG || (DWORD)hr == (DWORD)FVE_LIB_HRESULT_NOT_SUPPORTED)
+			return gFve.SetFveMethod(volumeHandle, FVE_LIB_ENCRYPTION_METHOD_AES_128);
+		return hr;
+	}
+
+	return S_OK;
+}
+
+static HRESULT WINAPI EncryptWithPasswordCallback(HANDLE volumeHandle, void* context)
+{
+	FVE_ENCRYPT_PASSWORD_CONTEXT* encryptContext = (FVE_ENCRYPT_PASSWORD_CONTEXT*)context;
+
+	if (encryptContext == NULL)
+		return E_INVALIDARG;
+
+	return FveLibEncryptWithPasswordEx(
+		volumeHandle,
+		encryptContext->Password,
+		encryptContext->Flags,
+		encryptContext->RecoveryPassword,
+		encryptContext->CchRecoveryPassword);
+}
+
 HRESULT FveLibInit(void)
 {
 	HRESULT hr = HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
@@ -613,6 +744,12 @@ HRESULT FveLibInit(void)
 	gFve.UnlockVolumeWithAccessMode = (PFN_FveUnlockVolumeWithAccessMode)GetProcAddress(gFve.ApiDll, "FveUnlockVolumeWithAccessMode");
 	gFve.ConversionEncrypt = (PFN_FveConversionEncrypt)GetProcAddress(gFve.ApiDll, "FveConversionEncrypt");
 	gFve.ConversionEncryptEx = (PFN_FveConversionEncryptEx)GetProcAddress(gFve.ApiDll, "FveConversionEncryptEx");
+	gFve.InitVolumeEx = (PFN_FveInitVolumeEx)GetProcAddress(gFve.ApiDll, "FveInitVolumeEx");
+	gFve.AddAuthMethodInformation = (PFN_FveAddAuthMethodInformation)GetProcAddress(gFve.ApiDll, "FveAddAuthMethodInformation");
+	gFve.CommitChanges = (PFN_FveCommitChanges)GetProcAddress(gFve.ApiDll, "FveCommitChanges");
+	gFve.SetFveMethod = (PFN_FveSetFveMethod)GetProcAddress(gFve.ApiDll, "FveSetFveMethod");
+	gFve.SetFveMethodEx = (PFN_FveSetFveMethodEx)GetProcAddress(gFve.ApiDll, "FveSetFveMethodEx");
+	gFve.IsRecoveryPasswordValidW = (PFN_FveIsRecoveryPasswordValidW)GetProcAddress(gFve.ApiDll, "FveIsRecoveryPasswordValidW");
 	gFve.InternalFveIsVolumeEncrypted = (PFN_InternalFveIsVolumeEncrypted)GetProcAddress(gFve.ApiDll, "InternalFveIsVolumeEncrypted");
 
 	return S_OK;
@@ -821,6 +958,168 @@ HRESULT FveLibStartEncryptionExByPath(PCWSTR volumePath, DWORD flags)
 	return OpenRunClose(volumePath, FVE_LIB_ACCESS_READ_WRITE, EncryptCallback, &flags);
 }
 
+HRESULT FveLibInitVolumeForEncryption(HANDLE volumeHandle)
+{
+	if (volumeHandle == NULL)
+		return E_INVALIDARG;
+
+	if (gFve.InitVolumeEx == NULL)
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+	return gFve.InitVolumeEx(volumeHandle, NULL, 0);
+}
+
+HRESULT FveLibAddPasswordProtector(HANDLE volumeHandle, PCWSTR password, GUID* protectorId)
+{
+	FVE_AUTH_ELEMENT authElement;
+	FVE_AUTH_ELEMENT* authElementPointer = &authElement;
+	FVE_UNLOCK_SETTINGS authMethod;
+
+	if (volumeHandle == NULL || password == NULL || password[0] == L'\0' || protectorId == NULL)
+		return E_INVALIDARG;
+
+	if (gFve.AddAuthMethodInformation == NULL)
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+	HRESULT hr = CreatePassphraseAuth(password, &authElement);
+	if (FAILED(hr))
+		return hr;
+
+	InitAuthMethodInformation(&authMethod, FVE_LIB_SECRET_TYPE_PASSPHRASE, &authElementPointer);
+	return gFve.AddAuthMethodInformation(volumeHandle, &authMethod, protectorId);
+}
+
+HRESULT FveLibAddRecoveryPasswordProtector(HANDLE volumeHandle, PCWSTR recoveryPassword, GUID* protectorId)
+{
+	FVE_AUTH_ELEMENT authElement;
+	FVE_AUTH_ELEMENT* authElementPointer = &authElement;
+	FVE_UNLOCK_SETTINGS authMethod;
+
+	if (volumeHandle == NULL || recoveryPassword == NULL || recoveryPassword[0] == L'\0' || protectorId == NULL)
+		return E_INVALIDARG;
+
+	if (gFve.AddAuthMethodInformation == NULL)
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+	HRESULT hr = CreateRecoveryAuth(recoveryPassword, &authElement);
+	if (FAILED(hr))
+		return hr;
+
+	InitAuthMethodInformation(&authMethod, FVE_LIB_SECRET_TYPE_RECOVERY_PASSWORD, &authElementPointer);
+	return gFve.AddAuthMethodInformation(volumeHandle, &authMethod, protectorId);
+}
+
+HRESULT FveLibGenerateRecoveryPassword(PWSTR output, size_t cchOutput)
+{
+	USHORT randomGroups[8];
+	size_t outIndex = 0;
+	HRESULT hr;
+
+	if (output == NULL || cchOutput < FVE_LIB_RECOVERY_PASSWORD_CCH)
+		return E_INVALIDARG;
+
+	hr = FillRandomBytes(randomGroups, sizeof(randomGroups));
+	if (FAILED(hr))
+		return hr;
+
+	for (size_t groupIndex = 0; groupIndex < ARRAYSIZE(randomGroups); ++groupIndex)
+	{
+		DWORD groupValue = (DWORD)randomGroups[groupIndex] * 11u;
+
+		if (groupIndex > 0)
+			output[outIndex++] = L'-';
+
+		WriteSixDigitGroup(groupValue, &output[outIndex]);
+		outIndex += 6;
+	}
+	output[outIndex] = L'\0';
+
+	if (gFve.IsRecoveryPasswordValidW != NULL)
+	{
+		BOOL isValid = FALSE;
+
+		hr = gFve.IsRecoveryPasswordValidW(output, &isValid);
+		if (FAILED(hr))
+			return hr;
+		if (!isValid)
+			return E_FAIL;
+	}
+
+	return S_OK;
+}
+
+HRESULT FveLibEncryptWithPassword(HANDLE volumeHandle, PCWSTR password, PWSTR recoveryPassword, size_t cchRecoveryPassword)
+{
+	return FveLibEncryptWithPasswordEx(volumeHandle, password, 0, recoveryPassword, cchRecoveryPassword);
+}
+
+HRESULT FveLibEncryptWithPasswordEx(HANDLE volumeHandle, PCWSTR password, DWORD flags, PWSTR recoveryPassword, size_t cchRecoveryPassword)
+{
+	WCHAR generatedRecoveryPassword[FVE_LIB_RECOVERY_PASSWORD_CCH];
+	GUID passwordProtectorId;
+	GUID recoveryProtectorId;
+	HRESULT hr;
+
+	if (volumeHandle == NULL || password == NULL || password[0] == L'\0' ||
+		recoveryPassword == NULL || cchRecoveryPassword < FVE_LIB_RECOVERY_PASSWORD_CCH)
+		return E_INVALIDARG;
+
+	if (gFve.CommitChanges == NULL)
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+	hr = FveLibGenerateRecoveryPassword(generatedRecoveryPassword, ARRAYSIZE(generatedRecoveryPassword));
+	if (FAILED(hr))
+		return hr;
+
+	hr = FveLibInitVolumeForEncryption(volumeHandle);
+	if (FAILED(hr))
+		return hr;
+
+	hr = FveLibAddPasswordProtector(volumeHandle, password, &passwordProtectorId);
+	if (FAILED(hr))
+		return hr;
+
+	hr = FveLibAddRecoveryPasswordProtector(volumeHandle, generatedRecoveryPassword, &recoveryProtectorId);
+	if (FAILED(hr))
+		return hr;
+
+	hr = SetDefaultEncryptionMethod(volumeHandle);
+	if (FAILED(hr))
+		return hr;
+
+	hr = gFve.CommitChanges(volumeHandle);
+	if (FAILED(hr))
+		return hr;
+
+	if (gFve.ConversionEncryptEx != NULL)
+		hr = FveLibStartEncryptionEx(volumeHandle, flags);
+	else if (flags == 0)
+		hr = FveLibStartEncryption(volumeHandle);
+	else
+		hr = HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+	if (FAILED(hr))
+		return hr;
+
+	return CopyWide(generatedRecoveryPassword, recoveryPassword, cchRecoveryPassword);
+}
+
+HRESULT FveLibEncryptWithPasswordByPath(PCWSTR volumePath, PCWSTR password, PWSTR recoveryPassword, size_t cchRecoveryPassword)
+{
+	return FveLibEncryptWithPasswordExByPath(volumePath, password, 0, recoveryPassword, cchRecoveryPassword);
+}
+
+HRESULT FveLibEncryptWithPasswordExByPath(PCWSTR volumePath, PCWSTR password, DWORD flags, PWSTR recoveryPassword, size_t cchRecoveryPassword)
+{
+	FVE_ENCRYPT_PASSWORD_CONTEXT context;
+
+	context.Password = password;
+	context.Flags = flags;
+	context.RecoveryPassword = recoveryPassword;
+	context.CchRecoveryPassword = cchRecoveryPassword;
+
+	return OpenRunClose(volumePath, FVE_LIB_ACCESS_READ_WRITE, EncryptWithPasswordCallback, &context);
+}
+
 HRESULT FveLibFormatRecoveryPassword(PCWSTR input, PWSTR output, size_t cchOutput)
 {
 	WCHAR digits[49];
@@ -886,6 +1185,8 @@ const char* FveLibErrorName(HRESULT hr)
 		return "NotBitLockerVolume";
 	case 0x8031004Au:
 		return "VolumeRemoved";
+	case 0x80310069u:
+		return "NoSuchKeyProtector";
 	default:
 		return "Unknown";
 	}
