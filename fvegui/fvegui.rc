@@ -91,7 +91,7 @@ END
 
 STRINGTABLE
 BEGIN
-    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  %s  %s  %u%%"
+    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  %s  %s"
     IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT "%s  %s  %s  status unavailable"
     IDS_STATUS_UNAVAILABLE_FORMAT "Volume:       %s\r\nLabel:        %s\r\nDrive type:   %s\r\nStatus:       unavailable\r\nError:        %s\r\n"
     IDS_STATUS_AVAILABLE_FORMAT "Volume:       %s\r\nLabel:        %s\r\nDrive type:   %s\r\n\r\nVolume state: %s\r\nProtection:   %s\r\nLock state:   %s\r\n"
@@ -181,7 +181,7 @@ END
 
 STRINGTABLE
 BEGIN
-    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  %s  %s  %u%%"
+    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  %s  %s"
     IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT "%s  %s  %s  状态不可用"
     IDS_STATUS_UNAVAILABLE_FORMAT "卷:           %s\r\n标签:         %s\r\n驱动器类型:   %s\r\n状态:         不可用\r\n错误:         %s\r\n"
     IDS_STATUS_AVAILABLE_FORMAT "卷:           %s\r\n标签:         %s\r\n驱动器类型:   %s\r\n\r\n卷状态:       %s\r\n保护:         %s\r\n锁定状态:     %s\r\n"

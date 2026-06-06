@@ -121,7 +121,6 @@ static void PrintVolumeInfo(const FVE_LIB_VOLUME_INFO* info)
 	printf("VolumeStatus:      %s (%lu)\n", FveLibVolumeStatusName(info->VolumeStatus), (unsigned long)info->VolumeStatus);
 	printf("ProtectionStatus:  %s (%lu)\n", FveLibProtectionStatusName(info->ProtectionStatus), (unsigned long)info->ProtectionStatus);
 	printf("LockStatus:        %s (%lu)\n", FveLibLockStatusName(info->LockStatus), (unsigned long)info->LockStatus);
-	printf("EncryptedPercent:  %u%%\n", (unsigned int)info->EncryptionPercentage);
 }
 
 static int InitFveLib(void)
@@ -158,7 +157,6 @@ static int RunStatus(const char* volumeArg)
 			info.VolumeStatus = FVE_LIB_VOLUME_FULLY_ENCRYPTED;
 			info.ProtectionStatus = FVE_LIB_PROTECTION_ON;
 			info.LockStatus = FVE_LIB_LOCK_LOCKED;
-			info.EncryptionPercentage = 100;
 			PrintVolumeInfo(&info);
 			return 0;
 		}

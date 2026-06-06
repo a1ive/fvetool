@@ -422,7 +422,7 @@ static void BuildVolumeDisplayName(FVE_GUI_VOLUME_ENTRY* volume)
 
 	if (volume->HasStatus && SUCCEEDED(volume->StatusHr))
 	{
-		LoadResourceStringOrFallback(IDS_VOLUME_DISPLAY_FORMAT, format, ARRAYSIZE(format), L"%s  %s  %s  %s  %u%%");
+		LoadResourceStringOrFallback(IDS_VOLUME_DISPLAY_FORMAT, format, ARRAYSIZE(format), L"%s  %s  %s  %s");
 		StringCchPrintfW(
 			volume->DisplayName,
 			ARRAYSIZE(volume->DisplayName),
@@ -430,8 +430,7 @@ static void BuildVolumeDisplayName(FVE_GUI_VOLUME_ENTRY* volume)
 			volume->Path,
 			label,
 			VolumeStatusText(volume->Info.VolumeStatus),
-			LockStatusText(volume->Info.LockStatus),
-			(unsigned int)volume->Info.EncryptionPercentage);
+			LockStatusText(volume->Info.LockStatus));
 	} else {
 		LoadResourceStringOrFallback(IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT, format, ARRAYSIZE(format), L"%s  %s  %s  status unavailable");
 		StringCchPrintfW(

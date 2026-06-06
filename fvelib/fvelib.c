@@ -18,6 +18,7 @@
 
 #include "fvelib.h"
 
+#include <string.h>
 #include <wctype.h>
 
 #define FVE_LIB_STATUS_OUTPUT_SIZE 0x80u
@@ -40,7 +41,7 @@ typedef struct FVE_GET_STATUS_OUTPUT
 	DWORD Version;
 	DWORD Reserved1;
 	DWORD ConversionStatus;
-	double PercentComplete;
+	UINT64 PercentComplete;
 	BYTE Reserved2[0x20];
 	DWORD ProtectionStatus;
 	BYTE Reserved3[0x44];
@@ -83,59 +84,27 @@ typedef HRESULT(WINAPI* PFN_FveAuthElementFromPassPhraseW)(LPCWSTR passphrase, F
 typedef HRESULT(WINAPI* PFN_FveAuthElementFromRecoveryPasswordW)(LPCWSTR recoveryPassword, FVE_AUTH_ELEMENT* authElement);
 typedef HRESULT(WINAPI* PFN_InternalFveIsVolumeEncrypted)(HANDLE volumeHandle);
 
-static HMODULE gFveApiDll;
-static PFN_FveOpenVolumeW gFveOpenVolumeW;
-static PFN_FveCloseVolume gFveCloseVolume;
-static PFN_FveCloseVolumeForUnlock gFveCloseVolumeForUnlock;
-static PFN_FveGetStatusW gFveGetStatusW;
-static PFN_FveGetStatus gFveGetStatus;
-static PFN_FveUnlockVolume gFveUnlockVolume;
-static PFN_FveUnlockVolumeWithAccessMode gFveUnlockVolumeWithAccessMode;
-static PFN_FveLockVolume gFveLockVolume;
-static PFN_FveConversionDecrypt gFveConversionDecrypt;
-static PFN_FveConversionDecryptEx gFveConversionDecryptEx;
-static PFN_FveConversionEncrypt gFveConversionEncrypt;
-static PFN_FveConversionEncryptEx gFveConversionEncryptEx;
-static PFN_FveAuthElementFromPassPhraseW gFveAuthElementFromPassPhraseW;
-static PFN_FveAuthElementFromRecoveryPasswordW gFveAuthElementFromRecoveryPasswordW;
-static PFN_InternalFveIsVolumeEncrypted gInternalFveIsVolumeEncrypted;
-
-static HRESULT EnsureInitialized(void)
+typedef struct FVE_API
 {
-	if (gFveApiDll != NULL)
-		return S_OK;
+	HMODULE ApiDll;
+	PFN_FveOpenVolumeW OpenVolumeW;
+	PFN_FveCloseVolume CloseVolume;
+	PFN_FveCloseVolumeForUnlock CloseVolumeForUnlock;
+	PFN_FveGetStatusW GetStatusW;
+	PFN_FveGetStatus GetStatus;
+	PFN_FveUnlockVolume UnlockVolume;
+	PFN_FveUnlockVolumeWithAccessMode UnlockVolumeWithAccessMode;
+	PFN_FveLockVolume LockVolume;
+	PFN_FveConversionDecrypt ConversionDecrypt;
+	PFN_FveConversionDecryptEx ConversionDecryptEx;
+	PFN_FveConversionEncrypt ConversionEncrypt;
+	PFN_FveConversionEncryptEx ConversionEncryptEx;
+	PFN_FveAuthElementFromPassPhraseW AuthElementFromPassPhraseW;
+	PFN_FveAuthElementFromRecoveryPasswordW AuthElementFromRecoveryPasswordW;
+	PFN_InternalFveIsVolumeEncrypted InternalFveIsVolumeEncrypted;
+} FVE_API;
 
-	return FveLibInit();
-}
-
-static HRESULT LoadRequiredProc(FARPROC* target, const char* name)
-{
-	FARPROC proc = GetProcAddress(gFveApiDll, name);
-	if (proc == NULL)
-		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
-
-	*target = proc;
-	return S_OK;
-}
-
-static void ClearProcPointers(void)
-{
-	gFveOpenVolumeW = NULL;
-	gFveCloseVolume = NULL;
-	gFveCloseVolumeForUnlock = NULL;
-	gFveGetStatusW = NULL;
-	gFveGetStatus = NULL;
-	gFveUnlockVolume = NULL;
-	gFveUnlockVolumeWithAccessMode = NULL;
-	gFveLockVolume = NULL;
-	gFveConversionDecrypt = NULL;
-	gFveConversionDecryptEx = NULL;
-	gFveConversionEncrypt = NULL;
-	gFveConversionEncryptEx = NULL;
-	gFveAuthElementFromPassPhraseW = NULL;
-	gFveAuthElementFromRecoveryPasswordW = NULL;
-	gInternalFveIsVolumeEncrypted = NULL;
-}
+static FVE_API gFve;
 
 static HRESULT CopyTrimmed(PCWSTR input, PWSTR output, size_t cchOutput)
 {
@@ -287,21 +256,11 @@ static FVE_LIB_LOCK_STATUS LockStatusFromRaw(DWORD protectionStatus)
 	return protectionStatus == 1 ? FVE_LIB_LOCK_LOCKED : FVE_LIB_LOCK_UNLOCKED;
 }
 
-static BYTE PercentToByte(double percent)
-{
-	if (percent < 0.0)
-		percent = 0.0;
-	if (percent > 100.0)
-		percent = 100.0;
-	return (BYTE)(percent + 0.5);
-}
-
 static void VolumeInfoFromOutput(const FVE_GET_STATUS_OUTPUT* output, FVE_LIB_VOLUME_INFO* volumeInfo)
 {
 	volumeInfo->VolumeStatus = VolumeStatusFromRaw(output->ConversionStatus);
 	volumeInfo->ProtectionStatus = ProtectionStatusFromRaw(output->ProtectionStatus);
 	volumeInfo->LockStatus = LockStatusFromRaw(output->ProtectionStatus);
-	volumeInfo->EncryptionPercentage = PercentToByte(output->PercentComplete);
 }
 
 static BOOL IsNotEncryptedStatusHr(HRESULT hr)
@@ -323,7 +282,6 @@ static void SetLockedVolumeInfo(FVE_LIB_VOLUME_INFO* volumeInfo)
 	volumeInfo->VolumeStatus = FVE_LIB_VOLUME_FULLY_ENCRYPTED;
 	volumeInfo->ProtectionStatus = FVE_LIB_PROTECTION_ON;
 	volumeInfo->LockStatus = FVE_LIB_LOCK_LOCKED;
-	volumeInfo->EncryptionPercentage = 100;
 }
 
 static void SetNotEncryptedVolumeInfo(FVE_LIB_VOLUME_INFO* volumeInfo)
@@ -332,7 +290,6 @@ static void SetNotEncryptedVolumeInfo(FVE_LIB_VOLUME_INFO* volumeInfo)
 	volumeInfo->VolumeStatus = FVE_LIB_VOLUME_FULLY_DECRYPTED;
 	volumeInfo->ProtectionStatus = FVE_LIB_PROTECTION_OFF;
 	volumeInfo->LockStatus = FVE_LIB_LOCK_UNLOCKED;
-	volumeInfo->EncryptionPercentage = 0;
 }
 
 static void SetEncryptedUnlockedVolumeInfo(FVE_LIB_VOLUME_INFO* volumeInfo)
@@ -341,7 +298,6 @@ static void SetEncryptedUnlockedVolumeInfo(FVE_LIB_VOLUME_INFO* volumeInfo)
 	volumeInfo->VolumeStatus = FVE_LIB_VOLUME_FULLY_ENCRYPTED;
 	volumeInfo->ProtectionStatus = FVE_LIB_PROTECTION_ON;
 	volumeInfo->LockStatus = FVE_LIB_LOCK_UNLOCKED;
-	volumeInfo->EncryptionPercentage = 100;
 }
 
 static HRESULT QueryStatusByPath(PCWSTR volumePath, FVE_LIB_VOLUME_INFO* volumeInfo)
@@ -350,11 +306,11 @@ static HRESULT QueryStatusByPath(PCWSTR volumePath, FVE_LIB_VOLUME_INFO* volumeI
 	HRESULT hr;
 
 	InitStatusOutput(&output, FVE_LIB_STATUS_OUTPUT_VERSION);
-	hr = gFveGetStatusW(volumePath, &output);
+	hr = gFve.GetStatusW(volumePath, &output);
 	if ((DWORD)hr == (DWORD)E_INVALIDARG)
 	{
 		InitStatusOutput(&output, FVE_LIB_STATUS_OUTPUT_LEGACY_VERSION);
-		hr = gFveGetStatusW(volumePath, &output);
+		hr = gFve.GetStatusW(volumePath, &output);
 	}
 	if (FVE_LIB_HRESULT_IS_VOLUME_LOCKED(hr))
 	{
@@ -382,11 +338,11 @@ static HRESULT QueryStatusByHandle(HANDLE volumeHandle, FVE_LIB_VOLUME_INFO* vol
 		return E_HANDLE;
 
 	InitStatusOutput(&output, FVE_LIB_STATUS_OUTPUT_VERSION);
-	hr = gFveGetStatus(volumeHandle, &output);
+	hr = gFve.GetStatus(volumeHandle, &output);
 	if ((DWORD)hr == (DWORD)E_INVALIDARG)
 	{
 		InitStatusOutput(&output, FVE_LIB_STATUS_OUTPUT_LEGACY_VERSION);
-		hr = gFveGetStatus(volumeHandle, &output);
+		hr = gFve.GetStatus(volumeHandle, &output);
 	}
 	if (FVE_LIB_HRESULT_IS_VOLUME_LOCKED(hr))
 	{
@@ -423,9 +379,9 @@ static HRESULT QueryStatusByOpenVolume(PCWSTR volumePath, FVE_LIB_VOLUME_INFO* v
 		return E_HANDLE;
 
 	hr = QueryStatusByHandle(volumeHandle, volumeInfo);
-	if (FAILED(hr) && gInternalFveIsVolumeEncrypted != NULL)
+	if (FAILED(hr) && gFve.InternalFveIsVolumeEncrypted != NULL)
 	{
-		encryptedHr = gInternalFveIsVolumeEncrypted(volumeHandle);
+		encryptedHr = gFve.InternalFveIsVolumeEncrypted(volumeHandle);
 		if (encryptedHr == S_FALSE || IsNotEncryptedStatusHr(encryptedHr))
 		{
 			SetNotEncryptedVolumeInfo(volumeInfo);
@@ -466,11 +422,9 @@ static HRESULT CreatePassphraseAuth(PCWSTR password, FVE_AUTH_ELEMENT* authEleme
 
 	if (password == NULL || authElement == NULL)
 		return E_INVALIDARG;
-	if (gFveAuthElementFromPassPhraseW == NULL)
-		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 
 	InitAuthElement(authElement, FVE_LIB_SECRET_TYPE_PASSPHRASE);
-	hr = gFveAuthElementFromPassPhraseW(password, authElement);
+	hr = gFve.AuthElementFromPassPhraseW(password, authElement);
 	if (FAILED(hr))
 		return hr;
 
@@ -485,15 +439,13 @@ static HRESULT CreateRecoveryAuth(PCWSTR recoveryPassword, FVE_AUTH_ELEMENT* aut
 
 	if (recoveryPassword == NULL || authElement == NULL)
 		return E_INVALIDARG;
-	if (gFveAuthElementFromRecoveryPasswordW == NULL)
-		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 
 	hr = FveLibFormatRecoveryPassword(recoveryPassword, formatted, ARRAYSIZE(formatted));
 	if (SUCCEEDED(hr))
 		passwordToUse = formatted;
 
 	InitAuthElement(authElement, FVE_LIB_SECRET_TYPE_RECOVERY_PASSWORD);
-	hr = gFveAuthElementFromRecoveryPasswordW(passwordToUse, authElement);
+	hr = gFve.AuthElementFromRecoveryPasswordW(passwordToUse, authElement);
 	if (FAILED(hr))
 		return hr;
 
@@ -519,26 +471,20 @@ static HRESULT UnlockWithSecret(HANDLE volumeHandle, PCWSTR secret, DWORD secret
 	if (volumeHandle == NULL || secret == NULL || secret[0] == L'\0')
 		return E_INVALIDARG;
 
-	hr = EnsureInitialized();
-	if (FAILED(hr))
-		return hr;
-
 	hr = CreateAuthElement(secret, secretType, &authElement);
 	if (FAILED(hr))
 		return hr;
 
-	if (gFveUnlockVolumeWithAccessMode != NULL)
+	if (gFve.UnlockVolumeWithAccessMode != NULL)
 	{
 		InitUnlockSettings(&unlockSettings, secretType, &authElementPointer);
-		hr = gFveUnlockVolumeWithAccessMode(volumeHandle, &unlockSettings, 0);
+		hr = gFve.UnlockVolumeWithAccessMode(volumeHandle, &unlockSettings, 0);
 		if (FAILED(hr))
 			return hr;
 
 		if (closeAfterUnlock)
 		{
-			if (gFveCloseVolumeForUnlock == NULL)
-				return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
-			hr = gFveCloseVolumeForUnlock(volumeHandle, &unlockSettings, 0, secretType);
+			hr = gFve.CloseVolumeForUnlock(volumeHandle, &unlockSettings, 0, secretType);
 			if (SUCCEEDED(hr) && closed != NULL)
 				*closed = TRUE;
 			return hr;
@@ -547,10 +493,7 @@ static HRESULT UnlockWithSecret(HANDLE volumeHandle, PCWSTR secret, DWORD secret
 		return S_OK;
 	}
 
-	if (gFveUnlockVolume == NULL)
-		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
-
-	return gFveUnlockVolume(volumeHandle, &authElement);
+	return gFve.UnlockVolume(volumeHandle, &authElement);
 }
 
 static HRESULT OpenUnlockClose(PCWSTR volumePath, PCWSTR secret, DWORD secretType)
@@ -619,54 +562,63 @@ static HRESULT WINAPI EncryptCallback(HANDLE volumeHandle, void* context)
 
 HRESULT FveLibInit(void)
 {
-	HRESULT hr;
+	HRESULT hr = HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 	FARPROC closeProc;
 
-	if (gFveApiDll != NULL)
+	if (gFve.ApiDll != NULL)
 		return S_OK;
 
-	ClearProcPointers();
-	gFveApiDll = LoadLibraryW(L"fveapi.dll");
-	if (gFveApiDll == NULL)
-		return HRESULT_FROM_WIN32(GetLastError());
-
-	hr = LoadRequiredProc((FARPROC*)&gFveOpenVolumeW, "FveOpenVolumeW");
-	if (FAILED(hr))
-		goto fail;
-	hr = LoadRequiredProc(&closeProc, "FveCloseVolume");
-	if (FAILED(hr))
-		goto fail;
-	gFveCloseVolume = (PFN_FveCloseVolume)closeProc;
-	gFveCloseVolumeForUnlock = (PFN_FveCloseVolumeForUnlock)closeProc;
-	hr = LoadRequiredProc((FARPROC*)&gFveGetStatusW, "FveGetStatusW");
-	if (FAILED(hr))
-		goto fail;
-	hr = LoadRequiredProc((FARPROC*)&gFveGetStatus, "FveGetStatus");
-	if (FAILED(hr))
-		goto fail;
-	hr = LoadRequiredProc((FARPROC*)&gFveUnlockVolume, "FveUnlockVolume");
-	if (FAILED(hr))
-		goto fail;
-	hr = LoadRequiredProc((FARPROC*)&gFveLockVolume, "FveLockVolume");
-	if (FAILED(hr))
-		goto fail;
-	hr = LoadRequiredProc((FARPROC*)&gFveConversionDecrypt, "FveConversionDecrypt");
-	if (FAILED(hr))
-		goto fail;
-	hr = LoadRequiredProc((FARPROC*)&gFveConversionDecryptEx, "FveConversionDecryptEx");
-	if (FAILED(hr))
-		goto fail;
-	hr = LoadRequiredProc((FARPROC*)&gFveAuthElementFromPassPhraseW, "FveAuthElementFromPassPhraseW");
-	if (FAILED(hr))
-		goto fail;
-	hr = LoadRequiredProc((FARPROC*)&gFveAuthElementFromRecoveryPasswordW, "FveAuthElementFromRecoveryPasswordW");
-	if (FAILED(hr))
+	memset(&gFve, 0, sizeof(gFve));
+	gFve.ApiDll = LoadLibraryW(L"fveapi.dll");
+	if (gFve.ApiDll == NULL)
 		goto fail;
 
-	gFveUnlockVolumeWithAccessMode = (PFN_FveUnlockVolumeWithAccessMode)GetProcAddress(gFveApiDll, "FveUnlockVolumeWithAccessMode");
-	gFveConversionEncrypt = (PFN_FveConversionEncrypt)GetProcAddress(gFveApiDll, "FveConversionEncrypt");
-	gFveConversionEncryptEx = (PFN_FveConversionEncryptEx)GetProcAddress(gFveApiDll, "FveConversionEncryptEx");
-	gInternalFveIsVolumeEncrypted = (PFN_InternalFveIsVolumeEncrypted)GetProcAddress(gFveApiDll, "InternalFveIsVolumeEncrypted");
+	gFve.OpenVolumeW = (PFN_FveOpenVolumeW)GetProcAddress(gFve.ApiDll, "FveOpenVolumeW");
+	if (gFve.OpenVolumeW == NULL)
+		goto fail;
+
+	closeProc = GetProcAddress(gFve.ApiDll, "FveCloseVolume");
+	if (closeProc == NULL)
+		goto fail;
+
+	gFve.CloseVolume = (PFN_FveCloseVolume)closeProc;
+	gFve.CloseVolumeForUnlock = (PFN_FveCloseVolumeForUnlock)closeProc;
+	gFve.GetStatusW = (PFN_FveGetStatusW)GetProcAddress(gFve.ApiDll, "FveGetStatusW");
+	if (gFve.GetStatusW == NULL)
+		goto fail;
+
+	gFve.GetStatus = (PFN_FveGetStatus)GetProcAddress(gFve.ApiDll, "FveGetStatus");
+	if (gFve.GetStatus == NULL)
+		goto fail;
+
+	gFve.UnlockVolume = (PFN_FveUnlockVolume)GetProcAddress(gFve.ApiDll, "FveUnlockVolume");
+	if (gFve.UnlockVolume == NULL)
+		goto fail;
+
+	gFve.LockVolume = (PFN_FveLockVolume)GetProcAddress(gFve.ApiDll, "FveLockVolume");
+	if (gFve.LockVolume == NULL)
+		goto fail;
+
+	gFve.ConversionDecrypt = (PFN_FveConversionDecrypt)GetProcAddress(gFve.ApiDll, "FveConversionDecrypt");
+	if (gFve.ConversionDecrypt == NULL)
+		goto fail;
+
+	gFve.ConversionDecryptEx = (PFN_FveConversionDecryptEx)GetProcAddress(gFve.ApiDll, "FveConversionDecryptEx");
+	if (gFve.ConversionDecryptEx == NULL)
+		goto fail;
+
+	gFve.AuthElementFromPassPhraseW = (PFN_FveAuthElementFromPassPhraseW)GetProcAddress(gFve.ApiDll, "FveAuthElementFromPassPhraseW");
+	if (gFve.AuthElementFromPassPhraseW == NULL)
+		goto fail;
+
+	gFve.AuthElementFromRecoveryPasswordW = (PFN_FveAuthElementFromRecoveryPasswordW)GetProcAddress(gFve.ApiDll, "FveAuthElementFromRecoveryPasswordW");
+	if (gFve.AuthElementFromRecoveryPasswordW == NULL)
+		goto fail;
+
+	gFve.UnlockVolumeWithAccessMode = (PFN_FveUnlockVolumeWithAccessMode)GetProcAddress(gFve.ApiDll, "FveUnlockVolumeWithAccessMode");
+	gFve.ConversionEncrypt = (PFN_FveConversionEncrypt)GetProcAddress(gFve.ApiDll, "FveConversionEncrypt");
+	gFve.ConversionEncryptEx = (PFN_FveConversionEncryptEx)GetProcAddress(gFve.ApiDll, "FveConversionEncryptEx");
+	gFve.InternalFveIsVolumeEncrypted = (PFN_InternalFveIsVolumeEncrypted)GetProcAddress(gFve.ApiDll, "InternalFveIsVolumeEncrypted");
 
 	return S_OK;
 fail:
@@ -676,10 +628,9 @@ fail:
 
 void FveLibFini(void)
 {
-	HMODULE dll = gFveApiDll;
+	HMODULE dll = gFve.ApiDll;
 
-	gFveApiDll = NULL;
-	ClearProcPointers();
+	memset(&gFve, 0, sizeof(gFve));
 
 	if (dll != NULL)
 		FreeLibrary(dll);
@@ -727,10 +678,6 @@ HRESULT FveLibGetStatusByPath(PCWSTR volumePath, FVE_LIB_VOLUME_INFO* volumeInfo
 	if (volumeInfo == NULL)
 		return E_INVALIDARG;
 
-	hr = EnsureInitialized();
-	if (FAILED(hr))
-		return hr;
-
 	hr = FveLibNormalizeVolumePath(volumePath, normalized, ARRAYSIZE(normalized));
 	if (FAILED(hr))
 		return hr;
@@ -764,32 +711,22 @@ HRESULT FveLibOpenVolume(PCWSTR volumePath, FVE_LIB_ACCESS_MODE accessMode, HAND
 		return E_INVALIDARG;
 	*volumeHandle = NULL;
 
-	hr = EnsureInitialized();
-	if (FAILED(hr))
-		return hr;
-
 	hr = FveLibNormalizeVolumePath(volumePath, normalized, ARRAYSIZE(normalized));
 	if (FAILED(hr))
 		return hr;
 
 	if (TryGetVolumeGuidPathForDrive(normalized, volumeGuidPath, ARRAYSIZE(volumeGuidPath)))
-		return gFveOpenVolumeW(volumeGuidPath, (DWORD)accessMode, volumeHandle);
+		return gFve.OpenVolumeW(volumeGuidPath, (DWORD)accessMode, volumeHandle);
 
-	return gFveOpenVolumeW(normalized, (DWORD)accessMode, volumeHandle);
+	return gFve.OpenVolumeW(normalized, (DWORD)accessMode, volumeHandle);
 }
 
 HRESULT FveLibCloseVolume(HANDLE volumeHandle)
 {
-	HRESULT hr;
-
 	if (volumeHandle == NULL || volumeHandle == INVALID_HANDLE_VALUE)
 		return S_OK;
 
-	hr = EnsureInitialized();
-	if (FAILED(hr))
-		return hr;
-
-	return gFveCloseVolume(volumeHandle);
+	return gFve.CloseVolume(volumeHandle);
 }
 
 HRESULT FveLibUnlockWithPassword(HANDLE volumeHandle, PCWSTR password)
@@ -820,16 +757,10 @@ HRESULT FveLibUnlockWithRecoveryPasswordByPath(PCWSTR volumePath, PCWSTR recover
 
 HRESULT FveLibLockVolume(HANDLE volumeHandle, BOOL dismountFirst)
 {
-	HRESULT hr;
-
 	if (volumeHandle == NULL)
 		return E_INVALIDARG;
 
-	hr = EnsureInitialized();
-	if (FAILED(hr))
-		return hr;
-
-	return gFveLockVolume(volumeHandle, dismountFirst ? 1u : 0u);
+	return gFve.LockVolume(volumeHandle, dismountFirst ? 1u : 0u);
 }
 
 HRESULT FveLibLockVolumeByPath(PCWSTR volumePath, BOOL dismountFirst)
@@ -839,30 +770,18 @@ HRESULT FveLibLockVolumeByPath(PCWSTR volumePath, BOOL dismountFirst)
 
 HRESULT FveLibStartDecryption(HANDLE volumeHandle)
 {
-	HRESULT hr;
-
 	if (volumeHandle == NULL)
 		return E_INVALIDARG;
 
-	hr = EnsureInitialized();
-	if (FAILED(hr))
-		return hr;
-
-	return gFveConversionDecrypt(volumeHandle);
+	return gFve.ConversionDecrypt(volumeHandle);
 }
 
 HRESULT FveLibStartDecryptionEx(HANDLE volumeHandle, DWORD flags)
 {
-	HRESULT hr;
-
 	if (volumeHandle == NULL)
 		return E_INVALIDARG;
 
-	hr = EnsureInitialized();
-	if (FAILED(hr))
-		return hr;
-
-	return gFveConversionDecryptEx(volumeHandle, flags);
+	return gFve.ConversionDecryptEx(volumeHandle, flags);
 }
 
 HRESULT FveLibStartDecryptionByPath(PCWSTR volumePath)
@@ -877,34 +796,24 @@ HRESULT FveLibStartDecryptionExByPath(PCWSTR volumePath, DWORD flags)
 
 HRESULT FveLibStartEncryption(HANDLE volumeHandle)
 {
-	HRESULT hr;
-
 	if (volumeHandle == NULL)
 		return E_INVALIDARG;
 
-	hr = EnsureInitialized();
-	if (FAILED(hr))
-		return hr;
-	if (gFveConversionEncrypt == NULL)
+	if (gFve.ConversionEncrypt == NULL)
 		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 
-	return gFveConversionEncrypt(volumeHandle);
+	return gFve.ConversionEncrypt(volumeHandle);
 }
 
 HRESULT FveLibStartEncryptionEx(HANDLE volumeHandle, DWORD flags)
 {
-	HRESULT hr;
-
 	if (volumeHandle == NULL)
 		return E_INVALIDARG;
 
-	hr = EnsureInitialized();
-	if (FAILED(hr))
-		return hr;
-	if (gFveConversionEncryptEx == NULL)
+	if (gFve.ConversionEncryptEx == NULL)
 		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 
-	return gFveConversionEncryptEx(volumeHandle, flags);
+	return gFve.ConversionEncryptEx(volumeHandle, flags);
 }
 
 HRESULT FveLibStartEncryptionByPath(PCWSTR volumePath)

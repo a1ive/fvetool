@@ -66,7 +66,6 @@ typedef struct FVE_LIB_VOLUME_INFO
 	FVE_LIB_VOLUME_STATUS VolumeStatus;
 	FVE_LIB_PROTECTION_STATUS ProtectionStatus;
 	FVE_LIB_LOCK_STATUS LockStatus;
-	BYTE EncryptionPercentage;
 } FVE_LIB_VOLUME_INFO;
 
 HRESULT FveLibInit(void);
