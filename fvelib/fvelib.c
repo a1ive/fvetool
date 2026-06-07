@@ -134,6 +134,130 @@ typedef struct FVE_API
 
 static FVE_API gFve;
 
+#if defined(_M_IX86)
+static void* gFveX86PerformAction;
+
+/*
+ * The WOW64 fveapi WriteDiscoveryVolumeData helper marshals action 0x0f as a
+ * 0x18-byte stack buffer. On current 64-bit Windows the service accepts the
+ * same 0x20-byte wire layout used by native x64 fveapi.
+ */
+__declspec(naked) static HRESULT FveLibX86WriteDiscoveryVolumeDataHook(void)
+{
+	__asm
+	{
+		push ebp
+		mov ebp, esp
+		sub esp, 20h
+
+		xor eax, eax
+		mov dword ptr [ebp - 20h], eax
+		mov dword ptr [ebp - 1Ch], eax
+		mov eax, dword ptr [ebp + 8]
+		mov dword ptr [ebp - 18h], eax
+		mov eax, dword ptr [ebp + 0Ch]
+		mov dword ptr [ebp - 14h], eax
+		mov eax, dword ptr [ebp + 10h]
+		mov dword ptr [ebp - 10h], eax
+		xor eax, eax
+		mov dword ptr [ebp - 0Ch], eax
+		mov eax, dword ptr [ebp + 14h]
+		mov dword ptr [ebp - 8], eax
+		xor eax, eax
+		mov dword ptr [ebp - 4], eax
+
+		lea eax, [ebp - 20h]
+		push eax
+		push 20h
+		push 0Fh
+		call dword ptr [gFveX86PerformAction]
+
+		mov esp, ebp
+		pop ebp
+		ret 10h
+	}
+}
+
+static BYTE* FindX86WriteDiscoveryVolumeData(HMODULE module, void** performAction)
+{
+	BYTE* base = (BYTE*)module;
+	IMAGE_DOS_HEADER* dos = (IMAGE_DOS_HEADER*)base;
+	IMAGE_NT_HEADERS* nt;
+	DWORD sizeOfImage;
+	static const BYTE callPattern[] = {
+		0x8D, 0x44, 0x24, 0x08, 0x50, 0x6A, 0x18, 0x6A, 0x0F,
+		0x89, 0x54, 0x24, 0x20, 0x89, 0x74, 0x24, 0x24, 0xE8
+	};
+	static const BYTE prologue[] = {
+		0x8B, 0xFF, 0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8
+	};
+
+	if (performAction == NULL)
+		return NULL;
+	*performAction = NULL;
+
+	if (base == NULL || dos->e_magic != IMAGE_DOS_SIGNATURE)
+		return NULL;
+	nt = (IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+	if (nt->Signature != IMAGE_NT_SIGNATURE ||
+		nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+		return NULL;
+
+	sizeOfImage = nt->OptionalHeader.SizeOfImage;
+	for (DWORD offset = 0; offset + sizeof(callPattern) + sizeof(LONG) <= sizeOfImage; ++offset)
+	{
+		BYTE* p = base + offset;
+		LONG rel;
+
+		if (memcmp(p, callPattern, sizeof(callPattern)) != 0)
+			continue;
+
+		for (DWORD back = 1; back <= 0x60 && offset >= back; ++back)
+		{
+			BYTE* start = p - back;
+
+			if (memcmp(start, prologue, sizeof(prologue)) != 0)
+				continue;
+
+			memcpy(&rel, p + sizeof(callPattern), sizeof(rel));
+			*performAction = p + sizeof(callPattern) + sizeof(rel) + rel;
+			return start;
+		}
+	}
+
+	return NULL;
+}
+
+static HRESULT InstallX86WriteDiscoveryVolumeDataHook(void)
+{
+	BYTE* target;
+	void* performAction;
+	DWORD oldProtect;
+	LONG rel;
+	BYTE patch[5];
+
+	if (gFveX86PerformAction != NULL)
+		return S_OK;
+
+	target = FindX86WriteDiscoveryVolumeData(gFve.ApiDll, &performAction);
+	if (target == NULL || performAction == NULL)
+		return S_FALSE;
+
+	rel = (LONG)((BYTE*)FveLibX86WriteDiscoveryVolumeDataHook - (target + sizeof(patch)));
+	patch[0] = 0xE9;
+	memcpy(patch + 1, &rel, sizeof(rel));
+
+	if (!VirtualProtect(target, sizeof(patch), PAGE_EXECUTE_READWRITE, &oldProtect))
+		return HRESULT_FROM_WIN32(GetLastError());
+	gFveX86PerformAction = performAction;
+	memcpy(target, patch, sizeof(patch));
+	FlushInstructionCache(GetCurrentProcess(), target, sizeof(patch));
+	VirtualProtect(target, sizeof(patch), oldProtect, &oldProtect);
+
+	return S_OK;
+}
+#endif
+
 static HRESULT CopyTrimmed(PCWSTR input, PWSTR output, size_t cchOutput)
 {
 	PCWSTR start = input;
@@ -752,6 +876,10 @@ HRESULT FveLibInit(void)
 	gFve.IsRecoveryPasswordValidW = (PFN_FveIsRecoveryPasswordValidW)GetProcAddress(gFve.ApiDll, "FveIsRecoveryPasswordValidW");
 	gFve.InternalFveIsVolumeEncrypted = (PFN_InternalFveIsVolumeEncrypted)GetProcAddress(gFve.ApiDll, "InternalFveIsVolumeEncrypted");
 
+#if defined(_M_IX86)
+	(void)InstallX86WriteDiscoveryVolumeDataHook();
+#endif
+
 	return S_OK;
 fail:
 	FveLibFini();
@@ -763,6 +891,9 @@ void FveLibFini(void)
 	HMODULE dll = gFve.ApiDll;
 
 	memset(&gFve, 0, sizeof(gFve));
+#if defined(_M_IX86)
+	gFveX86PerformAction = NULL;
+#endif
 
 	if (dll != NULL)
 		FreeLibrary(dll);
