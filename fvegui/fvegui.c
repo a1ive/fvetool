@@ -22,6 +22,7 @@
 #include <windows.h>
 
 #include <commctrl.h>
+#include <shellapi.h>
 #include <strsafe.h>
 
 #include "../fvelib/fvelib.h"
@@ -29,6 +30,7 @@
 
 #pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "shell32.lib")
 
 #define FVE_GUI_CLASS_NAME L"FveToolNativeGuiWindow"
 #define FVE_GUI_MAX_VOLUMES 32
@@ -122,6 +124,8 @@ typedef struct FVE_GUI_APP
 	BOOL Busy;
 	BOOL Elevated;
 	int ActiveTab;
+	int StartupTab;
+	WCHAR StartupVolumePath[4];
 	FVE_GUI_TEXT Text;
 	FVE_GUI_VOLUME_ENTRY Volumes[FVE_GUI_MAX_VOLUMES];
 	int VolumeCount;
@@ -314,6 +318,70 @@ static BOOL IsProcessElevated(void)
 
 	CloseHandle(token);
 	return elevated;
+}
+
+static BOOL NormalizeCommandLineVolumePath(PCWSTR input, PWSTR output, size_t cchOutput)
+{
+	WCHAR letter;
+
+	if (output == NULL || cchOutput < 3)
+		return FALSE;
+
+	output[0] = L'\0';
+	if (input == NULL || input[0] == L'\0')
+		return FALSE;
+
+	letter = input[0];
+	if (letter >= L'a' && letter <= L'z')
+		letter = (WCHAR)(letter - L'a' + L'A');
+
+	if (letter < L'A' || letter > L'Z')
+		return FALSE;
+	if (input[1] != L'\0' &&
+		(input[1] != L':' ||
+			(input[2] != L'\0' && (input[2] != L'\\' || input[3] != L'\0'))))
+		return FALSE;
+
+	output[0] = letter;
+	output[1] = L':';
+	output[2] = L'\0';
+	return TRUE;
+}
+
+static void ParseStartupOptions(FVE_GUI_APP* app)
+{
+	int argc;
+	LPWSTR* argv;
+
+	if (app == NULL)
+		return;
+
+	app->StartupTab = FVE_GUI_TAB_DECRYPT;
+	app->StartupVolumePath[0] = L'\0';
+
+	argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	if (argv == NULL)
+		return;
+
+	if (argc < 2)
+	{
+		LocalFree(argv);
+		return;
+	}
+
+	if (lstrcmpiW(argv[1], L"/encrypt") == 0)
+		app->StartupTab = FVE_GUI_TAB_ENCRYPT;
+	else if (lstrcmpiW(argv[1], L"/decrypt") == 0)
+		app->StartupTab = FVE_GUI_TAB_DECRYPT;
+	else {
+		LocalFree(argv);
+		return;
+	}
+
+	if (argc >= 3)
+		NormalizeCommandLineVolumePath(argv[2], app->StartupVolumePath, ARRAYSIZE(app->StartupVolumePath));
+
+	LocalFree(argv);
 }
 
 static void SetControlFont(HWND control, HFONT font)
@@ -721,6 +789,11 @@ static void RefreshVolumes(FVE_GUI_APP* app, BOOL preserveSelection)
 	{
 		GetSelectedDecryptPath(app, previousDecryptPath, ARRAYSIZE(previousDecryptPath));
 		GetSelectedEncryptPath(app, previousEncryptPath, ARRAYSIZE(previousEncryptPath));
+	} else if (app != NULL && app->StartupVolumePath[0] != L'\0') {
+		if (app->StartupTab == FVE_GUI_TAB_ENCRYPT)
+			StringCchCopyW(previousEncryptPath, ARRAYSIZE(previousEncryptPath), app->StartupVolumePath);
+		else
+			StringCchCopyW(previousDecryptPath, ARRAYSIZE(previousDecryptPath), app->StartupVolumePath);
 	}
 
 	SetBusy(app, TRUE, LoadTempString(IDS_REFRESHING_VOLUMES, L"Refreshing volumes..."));
@@ -744,6 +817,8 @@ static void RefreshVolumes(FVE_GUI_APP* app, BOOL preserveSelection)
 		app->EncryptVolumeCombo,
 		previousEncryptPath[0] != L'\0' ? previousEncryptPath : NULL,
 		ShouldIncludeEncryptVolume);
+	if (app != NULL)
+		app->StartupVolumePath[0] = L'\0';
 	RefreshStatusText(app);
 
 	SetBusy(app, FALSE, NULL);
@@ -1422,10 +1497,12 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 		CREATESTRUCTW* create = (CREATESTRUCTW*)lParam;
 		app = (FVE_GUI_APP*)create->lpCreateParams;
 		app->MainWindow = window;
-		app->ActiveTab = FVE_GUI_TAB_DECRYPT;
+		app->ActiveTab = app->StartupTab == FVE_GUI_TAB_ENCRYPT ?
+			FVE_GUI_TAB_ENCRYPT : FVE_GUI_TAB_DECRYPT;
 		SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)app);
 		if (!CreateControls(app))
 			return -1;
+		SetActiveTab(app, app->ActiveTab);
 		LayoutControls(window, app);
 		RefreshVolumes(app, FALSE);
 		return 0;
@@ -1622,6 +1699,7 @@ wWinMain(_In_ HINSTANCE hInstance,
 	ZeroMemory(&gApp, sizeof(gApp));
 	gApp.Instance = hInstance;
 	gApp.Elevated = IsProcessElevated();
+	ParseStartupOptions(&gApp);
 	LoadGuiText(&gApp.Text);
 
 	hr = FveLibInit();
