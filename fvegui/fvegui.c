@@ -468,8 +468,10 @@ static void UpdateTabBodyBrush(FVE_GUI_APP* app)
 	HDC memDC;
 	HBITMAP bmp;
 	HBITMAP oldBmp;
+	HBRUSH canaryBrush;
 	RECT tabRect;
 	RECT bodyRect;
+	COLORREF canary;
 	COLORREF color;
 
 	if (app->TabBodyBrush != NULL)
@@ -496,6 +498,16 @@ static void UpdateTabBodyBrush(FVE_GUI_APP* app)
 	bmp = CreateCompatibleBitmap(tabDC, tabRect.right, tabRect.bottom);
 	oldBmp = (HBITMAP)SelectObject(memDC, bmp);
 
+	/* Fill with a canary color before asking the tab control to paint.
+	   In classic mode (no visual styles) the tab control does not paint
+	   its body via WM_PRINTCLIENT, so the canary will survive.  When
+	   that happens we leave TabBodyBrush NULL and let
+	   PrepareTabControlBackground fall back to COLOR_BTNFACE. */
+	canary = RGB(0xFF, 0x00, 0xFF);
+	canaryBrush = CreateSolidBrush(canary);
+	FillRect(memDC, &tabRect, canaryBrush);
+	DeleteObject(canaryBrush);
+
 	SendMessageW(app->TabControl, WM_PRINTCLIENT, (WPARAM)memDC, PRF_CLIENT);
 	color = GetPixel(memDC, (bodyRect.left + bodyRect.right) / 2, (bodyRect.top + bodyRect.bottom) / 2);
 
@@ -504,7 +516,7 @@ static void UpdateTabBodyBrush(FVE_GUI_APP* app)
 	DeleteDC(memDC);
 	ReleaseDC(app->TabControl, tabDC);
 
-	if (color != CLR_INVALID)
+	if (color != CLR_INVALID && color != canary)
 		app->TabBodyBrush = CreateSolidBrush(color);
 }
 
@@ -1354,6 +1366,7 @@ static void LayoutControls(HWND window, FVE_GUI_APP* app)
 	int actionAreaWidth;
 	int actionGap;
 	int actionTotalWidth;
+	int comboClosedHeight;
 
 	GetClientRect(window, &client);
 	clientWidth = client.right - client.left;
@@ -1419,7 +1432,12 @@ static void LayoutControls(HWND window, FVE_GUI_APP* app)
 	if (comboWidth < ScaleForWindow(window, 220))
 		comboWidth = ScaleForWindow(window, 220);
 	MoveWindow(app->VolumeCombo, fieldLeft, top, comboWidth, ScaleForWindow(window, 220), TRUE);
-	MoveWindow(app->RefreshButton, rightColumnLeft, top, refreshWidth, topRowHeight, TRUE);
+	{
+		RECT comboRect;
+		GetWindowRect(app->VolumeCombo, &comboRect);
+		comboClosedHeight = comboRect.bottom - comboRect.top;
+	}
+	MoveWindow(app->RefreshButton, rightColumnLeft, top, refreshWidth, comboClosedHeight, TRUE);
 
 	decryptStatusTop = top + ScaleForWindow(window, 44);
 	decryptStatusHeight = keyTop - decryptStatusTop - ScaleForWindow(window, 8);
@@ -1429,7 +1447,7 @@ static void LayoutControls(HWND window, FVE_GUI_APP* app)
 
 	MoveWindow(app->SecretLabel, pageLeft, keyTop + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
 	MoveWindow(app->SecretEdit, fieldLeft, keyTop, comboWidth, topRowHeight, TRUE);
-	MoveWindow(app->RecoveryCheck, rightColumnLeft, keyTop + ScaleForWindow(window, 2), recoveryWidth, rowHeight, TRUE);
+	MoveWindow(app->RecoveryCheck, rightColumnLeft, keyTop, recoveryWidth, topRowHeight, TRUE);
 
 	actionLeft = fieldLeft;
 	actionAreaWidth = pageRight - fieldLeft;
@@ -1448,7 +1466,12 @@ static void LayoutControls(HWND window, FVE_GUI_APP* app)
 
 	MoveWindow(app->EncryptVolumeLabel, pageLeft, top + ScaleForWindow(window, 3), labelWidth, topRowHeight, TRUE);
 	MoveWindow(app->EncryptVolumeCombo, fieldLeft, top, comboWidth, ScaleForWindow(window, 220), TRUE);
-	MoveWindow(app->EncryptRefreshButton, rightColumnLeft, top, refreshWidth, topRowHeight, TRUE);
+	{
+		RECT comboRect;
+		GetWindowRect(app->EncryptVolumeCombo, &comboRect);
+		comboClosedHeight = comboRect.bottom - comboRect.top;
+	}
+	MoveWindow(app->EncryptRefreshButton, rightColumnLeft, top, refreshWidth, comboClosedHeight, TRUE);
 
 	passwordTop = top + ScaleForWindow(window, 44);
 	confirmTop = passwordTop + ScaleForWindow(window, 38);
@@ -1495,6 +1518,7 @@ static BOOL CreateControls(FVE_GUI_APP* app)
 	app->EncryptVolumeLabel = CreateChildWindow(app, L"STATIC", app->Text.VolumeLabel, 0, 0, -1);
 	app->EncryptVolumeCombo = CreateChildWindow(app, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, IDC_ENCRYPT_VOLUME_COMBO);
 	app->EncryptRefreshButton = CreateChildWindow(app, L"BUTTON", app->Text.RefreshButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_ENCRYPT_REFRESH_BUTTON);
+
 	app->EncryptPasswordLabel = CreateChildWindow(app, L"STATIC", app->Text.EncryptPasswordLabel, 0, 0, -1);
 	app->EncryptPasswordEdit = CreateChildWindow(app, L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, IDC_ENCRYPT_PASSWORD_EDIT);
 	app->EncryptConfirmLabel = CreateChildWindow(app, L"STATIC", app->Text.ConfirmPasswordLabel, 0, 0, -1);

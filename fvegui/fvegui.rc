@@ -24,22 +24,20 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "A1ive"
             VALUE "FileDescription", "FVEUnlocker"
-            VALUE "FileVersion", "1.0.0.0"
             VALUE "InternalName", "fvegui"
             VALUE "OriginalFilename", "fvegui.exe"
             VALUE "ProductName", "FVEUnlocker"
-            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "ProductVersion", "0.0.2.0"
             VALUE "LegalCopyright", "Copyright (c) 2026 A1ive"
         END
         BLOCK "080404B0"
         BEGIN
             VALUE "CompanyName", "A1ive"
             VALUE "FileDescription", "FVEUnlocker"
-            VALUE "FileVersion", "1.0.0.0"
             VALUE "InternalName", "fvegui"
             VALUE "OriginalFilename", "fvegui.exe"
             VALUE "ProductName", "FVEUnlocker"
-            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "ProductVersion", "0.0.2.0"
             VALUE "LegalCopyright", "Copyright (c) 2026 A1ive"
         END
     END
