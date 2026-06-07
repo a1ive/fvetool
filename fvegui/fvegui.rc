@@ -62,6 +62,13 @@ BEGIN
     IDS_LOCK_BUTTON "Lock"
     IDS_TURN_OFF_BUTTON "Turn off BitLocker"
     IDS_STATUS_LABEL "Status:"
+    IDS_DECRYPT_TAB "Decrypt"
+    IDS_ENCRYPT_TAB "Encrypt"
+    IDS_ENCRYPT_PASSWORD_LABEL "Password:"
+    IDS_CONFIRM_PASSWORD_LABEL "Confirm:"
+    IDS_ENCRYPT_BUTTON "Turn on BitLocker"
+    IDS_RECOVERY_KEY_LABEL "Recovery key:"
+    IDS_COPY_BUTTON "Copy"
 END
 
 STRINGTABLE
@@ -77,25 +84,14 @@ BEGIN
     IDS_PROTECTION_ON "On"
     IDS_LOCK_UNLOCKED "Unlocked"
     IDS_LOCK_LOCKED "Locked"
-    IDS_DRIVE_REMOVABLE "Removable"
-    IDS_DRIVE_FIXED "Fixed"
-    IDS_DRIVE_NETWORK "Network"
-    IDS_DRIVE_CDROM "CD-ROM"
-    IDS_DRIVE_RAMDISK "RAM disk"
-    IDS_DRIVE_NO_ROOT "No root"
     IDS_NO_LABEL "(no label)"
-    IDS_UNKNOWN_FS "unknown fs"
-    IDS_STATUS_UNAVAILABLE_SHORT "status unavailable"
     IDS_NO_VOLUME_SELECTED "No volume selected."
-    IDS_UNKNOWN_PARENS "(unknown)"
 END
 
 STRINGTABLE
 BEGIN
-    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  |  %s  |  %s"
-    IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT "%s  %s  |  %s  |  status unavailable"
-    IDS_STATUS_UNAVAILABLE_FORMAT "Volume:       %s\r\nLabel:        %s\r\nDrive type:   %s\r\nStatus:       unavailable\r\nError:        %s\r\n"
-    IDS_STATUS_AVAILABLE_FORMAT "Volume:       %s\r\nLabel:        %s\r\nDrive type:   %s\r\n\r\nVolume state: %s\r\nProtection:   %s\r\nLock state:   %s\r\n"
+    IDS_DECRYPT_STATUS_UNAVAILABLE_FORMAT "Status:       unavailable\r\nError:        %s"
+    IDS_DECRYPT_STATUS_AVAILABLE_FORMAT "Volume state: %s\r\nProtection:   %s\r\nLock state:   %s"
 END
 
 STRINGTABLE
@@ -106,7 +102,7 @@ BEGIN
     IDS_HRESULT_WITH_MESSAGE_FORMAT "hr=0x%08lX (%s): %s"
     IDS_REFRESHING_VOLUMES "Refreshing volumes..."
     IDS_NO_VOLUMES_FOUND "No actionable BitLocker volumes were found."
-    IDS_NOT_ELEVATED "Not elevated. Lock and turn-off operations may require administrator rights."
+    IDS_NOT_ELEVATED "Not elevated. Lock, turn-off, and encryption operations may require administrator rights."
     IDS_READY "Ready."
     IDS_MISSING_KEY_MESSAGE "Enter a password or recovery key first."
     IDS_MISSING_KEY_TITLE "Missing key"
@@ -128,6 +124,19 @@ BEGIN
     IDS_STARTING_DECRYPTION "Starting decryption..."
     IDS_TURN_OFF_FAILED "Turn off failed."
     IDS_DECRYPTION_STARTED "BitLocker decryption started."
+    IDS_NO_DRIVES_FOUND "No volumes were found."
+    IDS_MISSING_PASSWORD_MESSAGE "Enter and confirm the password first."
+    IDS_PASSWORD_MISMATCH_MESSAGE "The two passwords do not match."
+    IDS_PASSWORD_MISMATCH_TITLE "Password mismatch"
+    IDS_UNLOCK_BEFORE_ENCRYPT_MESSAGE "Unlock the volume before turning on BitLocker."
+    IDS_ALREADY_ENCRYPTED_MESSAGE "The selected volume is already fully encrypted."
+    IDS_ENCRYPTION_IN_PROGRESS_MESSAGE "BitLocker encryption is already in progress."
+    IDS_CONFIRM_ENCRYPT_MESSAGE "Turn on BitLocker for the selected volume?\r\n\r\nThis starts encryption and generates a recovery key."
+    IDS_CONFIRM_ENCRYPT_TITLE "Confirm BitLocker turn on"
+    IDS_STARTING_ENCRYPTION "Starting encryption..."
+    IDS_ENCRYPT_FAILED "Encryption failed."
+    IDS_ENCRYPTION_STARTED "BitLocker encryption started. Save or copy the recovery key."
+    IDS_RECOVERY_KEY_COPIED "Recovery key copied."
 END
 
 STRINGTABLE
@@ -138,6 +147,8 @@ BEGIN
     IDS_OPERATION_INIT_API "Initialize BitLocker API"
     IDS_OPERATION_REGISTER_CLASS "Register window class"
     IDS_OPERATION_CREATE_WINDOW "Create main window"
+    IDS_OPERATION_ENCRYPT "Turn on BitLocker"
+    IDS_OPERATION_COPY_RECOVERY "Copy recovery key"
 END
 
 LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
@@ -153,6 +164,13 @@ BEGIN
     IDS_LOCK_BUTTON "锁定"
     IDS_TURN_OFF_BUTTON "关闭 BitLocker"
     IDS_STATUS_LABEL "状态:"
+    IDS_DECRYPT_TAB "解密"
+    IDS_ENCRYPT_TAB "加密"
+    IDS_ENCRYPT_PASSWORD_LABEL "密码:"
+    IDS_CONFIRM_PASSWORD_LABEL "确认:"
+    IDS_ENCRYPT_BUTTON "开启 BitLocker"
+    IDS_RECOVERY_KEY_LABEL "恢复密钥:"
+    IDS_COPY_BUTTON "复制"
 END
 
 STRINGTABLE
@@ -168,25 +186,14 @@ BEGIN
     IDS_PROTECTION_ON "开启"
     IDS_LOCK_UNLOCKED "已解锁"
     IDS_LOCK_LOCKED "已锁定"
-    IDS_DRIVE_REMOVABLE "可移动"
-    IDS_DRIVE_FIXED "固定"
-    IDS_DRIVE_NETWORK "网络"
-    IDS_DRIVE_CDROM "CD-ROM"
-    IDS_DRIVE_RAMDISK "RAM 磁盘"
-    IDS_DRIVE_NO_ROOT "无根目录"
-    IDS_NO_LABEL "(无标签)"
-    IDS_UNKNOWN_FS "未知文件系统"
-    IDS_STATUS_UNAVAILABLE_SHORT "状态不可用"
+    IDS_NO_LABEL "(无卷标)"
     IDS_NO_VOLUME_SELECTED "未选择卷。"
-    IDS_UNKNOWN_PARENS "(未知)"
 END
 
 STRINGTABLE
 BEGIN
-    IDS_VOLUME_DISPLAY_FORMAT "%s  %s  |  %s  |  %s"
-    IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT "%s  %s  |  %s  |  状态不可用"
-    IDS_STATUS_UNAVAILABLE_FORMAT "卷:           %s\r\n标签:         %s\r\n驱动器类型:   %s\r\n状态:         不可用\r\n错误:         %s\r\n"
-    IDS_STATUS_AVAILABLE_FORMAT "卷:           %s\r\n标签:         %s\r\n驱动器类型:   %s\r\n\r\n卷状态:       %s\r\n保护:         %s\r\n锁定状态:     %s\r\n"
+    IDS_DECRYPT_STATUS_UNAVAILABLE_FORMAT "状态:         不可用\r\n错误:         %s"
+    IDS_DECRYPT_STATUS_AVAILABLE_FORMAT "卷状态:       %s\r\n保护:         %s\r\n锁定状态:     %s"
 END
 
 STRINGTABLE
@@ -197,7 +204,7 @@ BEGIN
     IDS_HRESULT_WITH_MESSAGE_FORMAT "hr=0x%08lX (%s): %s"
     IDS_REFRESHING_VOLUMES "正在刷新卷..."
     IDS_NO_VOLUMES_FOUND "未找到需要操作的 BitLocker 卷。"
-    IDS_NOT_ELEVATED "当前未以管理员权限运行，锁定和关闭 BitLocker 可能需要管理员权限。"
+    IDS_NOT_ELEVATED "当前未以管理员权限运行，锁定、关闭和加密 BitLocker 可能需要管理员权限。"
     IDS_READY "就绪。"
     IDS_MISSING_KEY_MESSAGE "请先输入密码或恢复密钥。"
     IDS_MISSING_KEY_TITLE "缺少密钥"
@@ -219,6 +226,19 @@ BEGIN
     IDS_STARTING_DECRYPTION "正在启动解密..."
     IDS_TURN_OFF_FAILED "关闭失败。"
     IDS_DECRYPTION_STARTED "BitLocker 解密已启动。"
+    IDS_NO_DRIVES_FOUND "未找到卷。"
+    IDS_MISSING_PASSWORD_MESSAGE "请先输入并确认密码。"
+    IDS_PASSWORD_MISMATCH_MESSAGE "两次输入的密码不一致。"
+    IDS_PASSWORD_MISMATCH_TITLE "密码不一致"
+    IDS_UNLOCK_BEFORE_ENCRYPT_MESSAGE "开启 BitLocker 前请先解锁该卷。"
+    IDS_ALREADY_ENCRYPTED_MESSAGE "选中的卷已经完全加密。"
+    IDS_ENCRYPTION_IN_PROGRESS_MESSAGE "BitLocker 加密已经在进行中。"
+    IDS_CONFIRM_ENCRYPT_MESSAGE "要为选中卷开启 BitLocker 吗?\r\n\r\n这会开始加密并生成恢复密钥。"
+    IDS_CONFIRM_ENCRYPT_TITLE "确认开启 BitLocker"
+    IDS_STARTING_ENCRYPTION "正在启动加密..."
+    IDS_ENCRYPT_FAILED "加密失败。"
+    IDS_ENCRYPTION_STARTED "BitLocker 加密已启动。请保存或复制恢复密钥。"
+    IDS_RECOVERY_KEY_COPIED "恢复密钥已复制。"
 END
 
 STRINGTABLE
@@ -229,4 +249,6 @@ BEGIN
     IDS_OPERATION_INIT_API "初始化 BitLocker API"
     IDS_OPERATION_REGISTER_CLASS "注册窗口类"
     IDS_OPERATION_CREATE_WINDOW "创建主窗口"
+    IDS_OPERATION_ENCRYPT "开启 BitLocker"
+    IDS_OPERATION_COPY_RECOVERY "复制恢复密钥"
 END

@@ -21,12 +21,14 @@
 #endif
 #include <windows.h>
 
+#include <commctrl.h>
 #include <strsafe.h>
 
 #include "../fvelib/fvelib.h"
 #include "resource.h"
 
 #pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#pragma comment(lib, "comctl32.lib")
 
 #define FVE_GUI_CLASS_NAME L"FveToolNativeGuiWindow"
 #define FVE_GUI_MAX_VOLUMES 32
@@ -34,6 +36,10 @@
 #define FVE_GUI_TEMP_STRING_BUFFERS 16
 #define FVE_GUI_TEMP_STRING_CCH 512
 
+#define FVE_GUI_TAB_DECRYPT 0
+#define FVE_GUI_TAB_ENCRYPT 1
+
+#define IDC_TAB_CONTROL 1000
 #define IDC_VOLUME_COMBO 1001
 #define IDC_REFRESH_BUTTON 1002
 #define IDC_SECRET_EDIT 1004
@@ -43,6 +49,14 @@
 #define IDC_DECRYPT_BUTTON 1008
 #define IDC_MESSAGE_STATIC 1009
 #define IDC_STATUS_LABEL 1011
+#define IDC_DECRYPT_STATUS_STATIC 1012
+#define IDC_ENCRYPT_VOLUME_COMBO 1020
+#define IDC_ENCRYPT_REFRESH_BUTTON 1021
+#define IDC_ENCRYPT_PASSWORD_EDIT 1022
+#define IDC_ENCRYPT_CONFIRM_EDIT 1023
+#define IDC_ENCRYPT_BUTTON 1024
+#define IDC_RECOVERY_KEY_EDIT 1025
+#define IDC_COPY_RECOVERY_BUTTON 1026
 
 typedef struct FVE_GUI_VOLUME_ENTRY
 {
@@ -50,7 +64,6 @@ typedef struct FVE_GUI_VOLUME_ENTRY
 	WCHAR RootPath[4];
 	WCHAR DisplayName[256];
 	WCHAR VolumeLabel[128];
-	WCHAR FileSystem[32];
 	UINT DriveType;
 	FVE_LIB_VOLUME_INFO Info;
 	HRESULT StatusHr;
@@ -60,6 +73,8 @@ typedef struct FVE_GUI_VOLUME_ENTRY
 typedef struct FVE_GUI_TEXT
 {
 	WCHAR AppTitle[128];
+	WCHAR DecryptTab[64];
+	WCHAR EncryptTab[64];
 	WCHAR VolumeLabel[64];
 	WCHAR RefreshButton[64];
 	WCHAR SecretLabel[64];
@@ -67,6 +82,11 @@ typedef struct FVE_GUI_TEXT
 	WCHAR UnlockButton[64];
 	WCHAR LockButton[64];
 	WCHAR TurnOffButton[96];
+	WCHAR EncryptPasswordLabel[64];
+	WCHAR ConfirmPasswordLabel[64];
+	WCHAR EncryptButton[64];
+	WCHAR RecoveryKeyLabel[64];
+	WCHAR CopyButton[64];
 	WCHAR StatusLabel[64];
 } FVE_GUI_TEXT;
 
@@ -74,6 +94,7 @@ typedef struct FVE_GUI_APP
 {
 	HINSTANCE Instance;
 	HWND MainWindow;
+	HWND TabControl;
 	HWND VolumeLabel;
 	HWND VolumeCombo;
 	HWND RefreshButton;
@@ -83,11 +104,24 @@ typedef struct FVE_GUI_APP
 	HWND UnlockButton;
 	HWND LockButton;
 	HWND DecryptButton;
+	HWND DecryptStatusStatic;
+	HWND EncryptVolumeLabel;
+	HWND EncryptVolumeCombo;
+	HWND EncryptRefreshButton;
+	HWND EncryptPasswordLabel;
+	HWND EncryptPasswordEdit;
+	HWND EncryptConfirmLabel;
+	HWND EncryptConfirmEdit;
+	HWND EncryptButton;
+	HWND RecoveryKeyLabel;
+	HWND RecoveryKeyEdit;
+	HWND CopyRecoveryButton;
 	HWND StatusLabel;
 	HWND MessageStatic;
 	HFONT Font;
 	BOOL Busy;
 	BOOL Elevated;
+	int ActiveTab;
 	FVE_GUI_TEXT Text;
 	FVE_GUI_VOLUME_ENTRY Volumes[FVE_GUI_MAX_VOLUMES];
 	int VolumeCount;
@@ -126,6 +160,8 @@ static void LoadGuiText(FVE_GUI_TEXT* text)
 	LoadResourceStringOrFallback((stringId), (text)->field, ARRAYSIZE((text)->field), (fallback))
 
 	LOAD_TEXT(AppTitle, IDS_APP_TITLE, L"BitLocker Native GUI");
+	LOAD_TEXT(DecryptTab, IDS_DECRYPT_TAB, L"Decrypt");
+	LOAD_TEXT(EncryptTab, IDS_ENCRYPT_TAB, L"Encrypt");
 	LOAD_TEXT(VolumeLabel, IDS_VOLUME_LABEL, L"Volume:");
 	LOAD_TEXT(RefreshButton, IDS_REFRESH_BUTTON, L"Refresh");
 	LOAD_TEXT(SecretLabel, IDS_SECRET_LABEL, L"Unlock key:");
@@ -133,6 +169,11 @@ static void LoadGuiText(FVE_GUI_TEXT* text)
 	LOAD_TEXT(UnlockButton, IDS_UNLOCK_BUTTON, L"Unlock");
 	LOAD_TEXT(LockButton, IDS_LOCK_BUTTON, L"Lock");
 	LOAD_TEXT(TurnOffButton, IDS_TURN_OFF_BUTTON, L"Turn off BitLocker");
+	LOAD_TEXT(EncryptPasswordLabel, IDS_ENCRYPT_PASSWORD_LABEL, L"Password:");
+	LOAD_TEXT(ConfirmPasswordLabel, IDS_CONFIRM_PASSWORD_LABEL, L"Confirm:");
+	LOAD_TEXT(EncryptButton, IDS_ENCRYPT_BUTTON, L"Turn on BitLocker");
+	LOAD_TEXT(RecoveryKeyLabel, IDS_RECOVERY_KEY_LABEL, L"Recovery key:");
+	LOAD_TEXT(CopyButton, IDS_COPY_BUTTON, L"Copy");
 	LOAD_TEXT(StatusLabel, IDS_STATUS_LABEL, L"Status:");
 
 #undef LOAD_TEXT
@@ -211,27 +252,6 @@ static PCWSTR LockStatusText(FVE_LIB_LOCK_STATUS status)
 		return LoadTempString(IDS_LOCK_UNLOCKED, L"Unlocked");
 	case FVE_LIB_LOCK_LOCKED:
 		return LoadTempString(IDS_LOCK_LOCKED, L"Locked");
-	default:
-		return LoadTempString(IDS_UNKNOWN, L"Unknown");
-	}
-}
-
-static PCWSTR DriveTypeText(UINT driveType)
-{
-	switch (driveType)
-	{
-	case DRIVE_REMOVABLE:
-		return LoadTempString(IDS_DRIVE_REMOVABLE, L"Removable");
-	case DRIVE_FIXED:
-		return LoadTempString(IDS_DRIVE_FIXED, L"Fixed");
-	case DRIVE_REMOTE:
-		return LoadTempString(IDS_DRIVE_NETWORK, L"Network");
-	case DRIVE_CDROM:
-		return LoadTempString(IDS_DRIVE_CDROM, L"CD-ROM");
-	case DRIVE_RAMDISK:
-		return LoadTempString(IDS_DRIVE_RAMDISK, L"RAM disk");
-	case DRIVE_NO_ROOT_DIR:
-		return LoadTempString(IDS_DRIVE_NO_ROOT, L"No root");
 	default:
 		return LoadTempString(IDS_UNKNOWN, L"Unknown");
 	}
@@ -328,33 +348,43 @@ static HWND CreateChildWindow(
 	return child;
 }
 
-static int GetSelectedVolumeIndex(const FVE_GUI_APP* app)
+static int GetSelectedVolumeIndexFromCombo(const FVE_GUI_APP* app, HWND combo)
 {
 	LRESULT selection;
 	LRESULT itemData;
 
-	if (app == NULL || app->VolumeCombo == NULL)
+	if (app == NULL || combo == NULL)
 		return -1;
 
-	selection = SendMessageW(app->VolumeCombo, CB_GETCURSEL, 0, 0);
+	selection = SendMessageW(combo, CB_GETCURSEL, 0, 0);
 	if (selection == CB_ERR)
 		return -1;
 
-	itemData = SendMessageW(app->VolumeCombo, CB_GETITEMDATA, (WPARAM)selection, 0);
+	itemData = SendMessageW(combo, CB_GETITEMDATA, (WPARAM)selection, 0);
 	if (itemData == CB_ERR || itemData < 0 || itemData >= app->VolumeCount)
 		return -1;
 
 	return (int)itemData;
 }
 
-static const FVE_GUI_VOLUME_ENTRY* GetSelectedVolume(const FVE_GUI_APP* app)
+static const FVE_GUI_VOLUME_ENTRY* GetSelectedVolumeFromCombo(const FVE_GUI_APP* app, HWND combo)
 {
-	int index = GetSelectedVolumeIndex(app);
+	int index = GetSelectedVolumeIndexFromCombo(app, combo);
 
 	if (index < 0)
 		return NULL;
 
 	return &app->Volumes[index];
+}
+
+static const FVE_GUI_VOLUME_ENTRY* GetSelectedDecryptVolume(const FVE_GUI_APP* app)
+{
+	return GetSelectedVolumeFromCombo(app, app != NULL ? app->VolumeCombo : NULL);
+}
+
+static const FVE_GUI_VOLUME_ENTRY* GetSelectedEncryptVolume(const FVE_GUI_APP* app)
+{
+	return GetSelectedVolumeFromCombo(app, app != NULL ? app->EncryptVolumeCombo : NULL);
 }
 
 static void SetMessage(FVE_GUI_APP* app, PCWSTR message)
@@ -371,18 +401,50 @@ static HBRUSH PrepareTransparentControlBackground(HDC dc)
 	return GetSysColorBrush(COLOR_WINDOW);
 }
 
+static HBRUSH PrepareWindowControlBackground(HDC dc)
+{
+	SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+	SetBkColor(dc, GetSysColor(COLOR_WINDOW));
+	SetBkMode(dc, OPAQUE);
+	return GetSysColorBrush(COLOR_WINDOW);
+}
+
+static int GetComboItemCount(HWND combo)
+{
+	LRESULT count;
+
+	if (combo == NULL)
+		return 0;
+
+	count = SendMessageW(combo, CB_GETCOUNT, 0, 0);
+	if (count == CB_ERR || count < 0)
+		return 0;
+
+	return (int)count;
+}
+
 static void UpdateButtons(FVE_GUI_APP* app)
 {
-	const FVE_GUI_VOLUME_ENTRY* volume = GetSelectedVolume(app);
+	const FVE_GUI_VOLUME_ENTRY* volume = GetSelectedDecryptVolume(app);
+	const FVE_GUI_VOLUME_ENTRY* encryptVolume = GetSelectedEncryptVolume(app);
 	BOOL hasVolume = volume != NULL;
 	BOOL hasStatus = hasVolume && volume->HasStatus && SUCCEEDED(volume->StatusHr);
 	BOOL locked = hasStatus && volume->Info.LockStatus == FVE_LIB_LOCK_LOCKED;
 	BOOL unlocked = hasStatus && volume->Info.LockStatus == FVE_LIB_LOCK_UNLOCKED;
 	BOOL decrypted = hasStatus && volume->Info.VolumeStatus == FVE_LIB_VOLUME_FULLY_DECRYPTED;
 	BOOL keyPresent = FALSE;
+	BOOL passwordPresent = FALSE;
+	BOOL confirmPresent = FALSE;
+	BOOL recoveryPresent = FALSE;
 
 	if (app->SecretEdit != NULL)
 		keyPresent = GetWindowTextLengthW(app->SecretEdit) > 0;
+	if (app->EncryptPasswordEdit != NULL)
+		passwordPresent = GetWindowTextLengthW(app->EncryptPasswordEdit) > 0;
+	if (app->EncryptConfirmEdit != NULL)
+		confirmPresent = GetWindowTextLengthW(app->EncryptConfirmEdit) > 0;
+	if (app->RecoveryKeyEdit != NULL)
+		recoveryPresent = GetWindowTextLengthW(app->RecoveryKeyEdit) > 0;
 
 	EnableWindow(app->VolumeCombo, !app->Busy);
 	EnableWindow(app->RefreshButton, !app->Busy);
@@ -391,6 +453,12 @@ static void UpdateButtons(FVE_GUI_APP* app)
 	EnableWindow(app->UnlockButton, !app->Busy && hasVolume && locked && keyPresent);
 	EnableWindow(app->LockButton, !app->Busy && hasVolume && unlocked && !decrypted);
 	EnableWindow(app->DecryptButton, !app->Busy && hasVolume && unlocked && !decrypted);
+	EnableWindow(app->EncryptVolumeCombo, !app->Busy);
+	EnableWindow(app->EncryptRefreshButton, !app->Busy);
+	EnableWindow(app->EncryptPasswordEdit, !app->Busy);
+	EnableWindow(app->EncryptConfirmEdit, !app->Busy);
+	EnableWindow(app->EncryptButton, !app->Busy && encryptVolume != NULL && passwordPresent && confirmPresent);
+	EnableWindow(app->CopyRecoveryButton, !app->Busy && recoveryPresent);
 }
 
 static void SetBusy(FVE_GUI_APP* app, BOOL busy, PCWSTR message)
@@ -407,44 +475,37 @@ static BOOL ShouldIncludeDrive(UINT driveType)
 	return driveType == DRIVE_FIXED || driveType == DRIVE_REMOVABLE;
 }
 
-static BOOL ShouldIncludeVolumeStatus(const FVE_GUI_VOLUME_ENTRY* volume)
+static BOOL ShouldIncludeDecryptVolume(const FVE_GUI_VOLUME_ENTRY* volume)
 {
-	if (volume == NULL || !volume->HasStatus || FAILED(volume->StatusHr))
+	if (volume == NULL)
+		return FALSE;
+
+	if (!ShouldIncludeDrive(volume->DriveType))
+		return FALSE;
+
+	if (!volume->HasStatus || FAILED(volume->StatusHr))
 		return TRUE;
 
 	return volume->Info.VolumeStatus != FVE_LIB_VOLUME_FULLY_DECRYPTED ||
 		volume->Info.LockStatus != FVE_LIB_LOCK_UNLOCKED;
 }
 
+static BOOL ShouldIncludeEncryptVolume(const FVE_GUI_VOLUME_ENTRY* volume)
+{
+	return volume != NULL;
+}
+
 static void BuildVolumeDisplayName(FVE_GUI_VOLUME_ENTRY* volume)
 {
-	WCHAR format[256];
 	PCWSTR label = volume->VolumeLabel[0] != L'\0' ?
 		volume->VolumeLabel : LoadTempString(IDS_NO_LABEL, L"(no label)");
-	PCWSTR fs = volume->FileSystem[0] != L'\0' ?
-		volume->FileSystem : LoadTempString(IDS_UNKNOWN_FS, L"unknown fs");
 
-	if (volume->HasStatus && SUCCEEDED(volume->StatusHr))
-	{
-		LoadResourceStringOrFallback(IDS_VOLUME_DISPLAY_FORMAT, format, ARRAYSIZE(format), L"%s  %s  %s  %s");
-		StringCchPrintfW(
-			volume->DisplayName,
-			ARRAYSIZE(volume->DisplayName),
-			format,
-			volume->Path,
-			label,
-			VolumeStatusText(volume->Info.VolumeStatus),
-			LockStatusText(volume->Info.LockStatus));
-	} else {
-		LoadResourceStringOrFallback(IDS_VOLUME_DISPLAY_UNAVAILABLE_FORMAT, format, ARRAYSIZE(format), L"%s  %s  %s  status unavailable");
-		StringCchPrintfW(
-			volume->DisplayName,
-			ARRAYSIZE(volume->DisplayName),
-			format,
-			volume->Path,
-			label,
-			fs);
-	}
+	StringCchPrintfW(
+		volume->DisplayName,
+		ARRAYSIZE(volume->DisplayName),
+		L"%s  %s",
+		volume->Path,
+		label);
 }
 
 static void FillVolumeMetadata(FVE_GUI_VOLUME_ENTRY* volume)
@@ -455,7 +516,6 @@ static void FillVolumeMetadata(FVE_GUI_VOLUME_ENTRY* volume)
 
 	volume->DriveType = GetDriveTypeW(volume->RootPath);
 	volume->VolumeLabel[0] = L'\0';
-	volume->FileSystem[0] = L'\0';
 
 	GetVolumeInformationW(
 		volume->RootPath,
@@ -464,8 +524,8 @@ static void FillVolumeMetadata(FVE_GUI_VOLUME_ENTRY* volume)
 		&serial,
 		&maxComponent,
 		&flags,
-		volume->FileSystem,
-		ARRAYSIZE(volume->FileSystem));
+		NULL,
+		0);
 }
 
 static void AddDriveVolume(FVE_GUI_APP* app, WCHAR driveLetter)
@@ -487,14 +547,9 @@ static void AddDriveVolume(FVE_GUI_APP* app, WCHAR driveLetter)
 	volume->RootPath[3] = L'\0';
 
 	FillVolumeMetadata(volume);
-	if (!ShouldIncludeDrive(volume->DriveType))
-		return;
-
 	hr = FveLibGetStatusByPath(volume->Path, &volume->Info);
 	volume->StatusHr = hr;
 	volume->HasStatus = TRUE;
-	if (!ShouldIncludeVolumeStatus(volume))
-		return;
 
 	BuildVolumeDisplayName(volume);
 	++app->VolumeCount;
@@ -504,7 +559,6 @@ static void FormatSelectedVolumeStatus(const FVE_GUI_VOLUME_ENTRY* volume, PWSTR
 {
 	WCHAR errorText[256];
 	WCHAR format[1024];
-	PCWSTR label;
 
 	if (volume == NULL)
 	{
@@ -512,50 +566,34 @@ static void FormatSelectedVolumeStatus(const FVE_GUI_VOLUME_ENTRY* volume, PWSTR
 		return;
 	}
 
-	label = volume->VolumeLabel[0] != L'\0' ?
-		volume->VolumeLabel : LoadTempString(IDS_NO_LABEL, L"(no label)");
-
 	if (!volume->HasStatus || FAILED(volume->StatusHr))
 	{
 		FormatHRESULT(volume->StatusHr, errorText, ARRAYSIZE(errorText));
 		LoadResourceStringOrFallback(
-			IDS_STATUS_UNAVAILABLE_FORMAT,
+			IDS_DECRYPT_STATUS_UNAVAILABLE_FORMAT,
 			format,
 			ARRAYSIZE(format),
-			L"Volume:       %s\r\n"
-			L"Label:        %s\r\n"
-			L"Drive type:   %s\r\n"
 			L"Status:       unavailable\r\n"
-			L"Error:        %s\r\n");
+			L"Error:        %s");
 		StringCchPrintfW(
 			output,
 			cchOutput,
 			format,
-			volume->Path,
-			label,
-			DriveTypeText(volume->DriveType),
 			errorText);
 		return;
 	}
 
 	LoadResourceStringOrFallback(
-		IDS_STATUS_AVAILABLE_FORMAT,
+		IDS_DECRYPT_STATUS_AVAILABLE_FORMAT,
 		format,
 		ARRAYSIZE(format),
-		L"Volume:       %s\r\n"
-		L"Label:        %s\r\n"
-		L"Drive type:   %s\r\n"
-		L"\r\n"
 		L"Volume state: %s\r\n"
 		L"Protection:   %s\r\n"
-		L"Lock state:   %s\r\n");
+		L"Lock state:   %s");
 	StringCchPrintfW(
 		output,
 		cchOutput,
 		format,
-		volume->Path,
-		label,
-		DriveTypeText(volume->DriveType),
 		VolumeStatusText(volume->Info.VolumeStatus),
 		ProtectionStatusText(volume->Info.ProtectionStatus),
 		LockStatusText(volume->Info.LockStatus));
@@ -563,12 +601,20 @@ static void FormatSelectedVolumeStatus(const FVE_GUI_VOLUME_ENTRY* volume, PWSTR
 
 static void RefreshStatusText(FVE_GUI_APP* app)
 {
+	WCHAR statusText[1024];
+
+	if (app != NULL && app->DecryptStatusStatic != NULL)
+	{
+		FormatSelectedVolumeStatus(GetSelectedDecryptVolume(app), statusText, ARRAYSIZE(statusText));
+		SetWindowTextW(app->DecryptStatusStatic, statusText);
+	}
+
 	UpdateButtons(app);
 }
 
-static BOOL GetSelectedPath(FVE_GUI_APP* app, PWSTR output, size_t cchOutput)
+static BOOL GetSelectedPathFromCombo(FVE_GUI_APP* app, HWND combo, PWSTR output, size_t cchOutput)
 {
-	const FVE_GUI_VOLUME_ENTRY* volume = GetSelectedVolume(app);
+	const FVE_GUI_VOLUME_ENTRY* volume = GetSelectedVolumeFromCombo(app, combo);
 
 	if (volume == NULL || output == NULL || cchOutput < ARRAYSIZE(volume->Path))
 		return FALSE;
@@ -577,45 +623,105 @@ static BOOL GetSelectedPath(FVE_GUI_APP* app, PWSTR output, size_t cchOutput)
 	return TRUE;
 }
 
-static void RepopulateVolumeCombo(FVE_GUI_APP* app, PCWSTR preferredPath)
+static BOOL GetSelectedDecryptPath(FVE_GUI_APP* app, PWSTR output, size_t cchOutput)
+{
+	return GetSelectedPathFromCombo(app, app != NULL ? app->VolumeCombo : NULL, output, cchOutput);
+}
+
+static BOOL GetSelectedEncryptPath(FVE_GUI_APP* app, PWSTR output, size_t cchOutput)
+{
+	return GetSelectedPathFromCombo(app, app != NULL ? app->EncryptVolumeCombo : NULL, output, cchOutput);
+}
+
+static int RepopulateVolumeCombo(
+	FVE_GUI_APP* app,
+	HWND combo,
+	PCWSTR preferredPath,
+	BOOL(*includeVolume)(const FVE_GUI_VOLUME_ENTRY*))
 {
 	int selectedIndex = -1;
+	int itemCount = 0;
 
-	SendMessageW(app->VolumeCombo, CB_RESETCONTENT, 0, 0);
+	if (app == NULL || combo == NULL)
+		return 0;
+
+	SendMessageW(combo, CB_RESETCONTENT, 0, 0);
 	for (int i = 0; i < app->VolumeCount; ++i)
 	{
-		LRESULT item = SendMessageW(app->VolumeCombo, CB_ADDSTRING, 0, (LPARAM)app->Volumes[i].DisplayName);
+		LRESULT item;
+
+		if (includeVolume != NULL && !includeVolume(&app->Volumes[i]))
+			continue;
+
+		item = SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)app->Volumes[i].DisplayName);
 		if (item != CB_ERR && item != CB_ERRSPACE)
-			SendMessageW(app->VolumeCombo, CB_SETITEMDATA, (WPARAM)item, (LPARAM)i);
+		{
+			SendMessageW(combo, CB_SETITEMDATA, (WPARAM)item, (LPARAM)i);
+			++itemCount;
+		}
 
 		if (preferredPath != NULL && lstrcmpiW(preferredPath, app->Volumes[i].Path) == 0)
 			selectedIndex = i;
 	}
 
-	if (selectedIndex < 0 && app->VolumeCount > 0)
-		selectedIndex = 0;
+	if (selectedIndex < 0 && itemCount > 0)
+	{
+		LRESULT itemData = SendMessageW(combo, CB_GETITEMDATA, 0, 0);
+		if (itemData != CB_ERR)
+			selectedIndex = (int)itemData;
+	}
 
 	if (selectedIndex >= 0)
 	{
-		for (int comboIndex = 0; comboIndex < app->VolumeCount; ++comboIndex)
+		for (int comboIndex = 0; comboIndex < itemCount; ++comboIndex)
 		{
-			LRESULT itemData = SendMessageW(app->VolumeCombo, CB_GETITEMDATA, (WPARAM)comboIndex, 0);
+			LRESULT itemData = SendMessageW(combo, CB_GETITEMDATA, (WPARAM)comboIndex, 0);
 			if (itemData == selectedIndex)
 			{
-				SendMessageW(app->VolumeCombo, CB_SETCURSEL, (WPARAM)comboIndex, 0);
+				SendMessageW(combo, CB_SETCURSEL, (WPARAM)comboIndex, 0);
 				break;
 			}
 		}
+	}
+
+	return itemCount;
+}
+
+static void SetReadyMessage(FVE_GUI_APP* app)
+{
+	int visibleCount;
+
+	if (app == NULL)
+		return;
+
+	visibleCount = app->ActiveTab == FVE_GUI_TAB_ENCRYPT ?
+		GetComboItemCount(app->EncryptVolumeCombo) :
+		GetComboItemCount(app->VolumeCombo);
+
+	if (visibleCount == 0)
+	{
+		if (app->ActiveTab == FVE_GUI_TAB_ENCRYPT)
+			SetMessage(app, LoadTempString(IDS_NO_DRIVES_FOUND, L"No volumes were found."));
+		else
+			SetMessage(app, LoadTempString(IDS_NO_VOLUMES_FOUND, L"No actionable BitLocker volumes were found."));
+	} else if (!app->Elevated) {
+		SetMessage(app, LoadTempString(IDS_NOT_ELEVATED, L"Not elevated. Lock, turn-off, and encryption operations may require administrator rights."));
+	} else {
+		SetMessage(app, LoadTempString(IDS_READY, L"Ready."));
 	}
 }
 
 static void RefreshVolumes(FVE_GUI_APP* app, BOOL preserveSelection)
 {
-	WCHAR previousPath[4] = L"";
+	WCHAR previousDecryptPath[4] = L"";
+	WCHAR previousEncryptPath[4] = L"";
 	DWORD driveMask;
 
 	if (preserveSelection)
-		GetSelectedPath(app, previousPath, ARRAYSIZE(previousPath));
+	{
+		GetSelectedDecryptPath(app, previousDecryptPath, ARRAYSIZE(previousDecryptPath));
+		GetSelectedEncryptPath(app, previousEncryptPath, ARRAYSIZE(previousEncryptPath));
+	}
 
 	SetBusy(app, TRUE, LoadTempString(IDS_REFRESHING_VOLUMES, L"Refreshing volumes..."));
 	app->VolumeCount = 0;
@@ -628,25 +734,20 @@ static void RefreshVolumes(FVE_GUI_APP* app, BOOL preserveSelection)
 			AddDriveVolume(app, letter);
 	}
 
-	RepopulateVolumeCombo(app, previousPath[0] != L'\0' ? previousPath : NULL);
+	RepopulateVolumeCombo(
+		app,
+		app->VolumeCombo,
+		previousDecryptPath[0] != L'\0' ? previousDecryptPath : NULL,
+		ShouldIncludeDecryptVolume);
+	RepopulateVolumeCombo(
+		app,
+		app->EncryptVolumeCombo,
+		previousEncryptPath[0] != L'\0' ? previousEncryptPath : NULL,
+		ShouldIncludeEncryptVolume);
 	RefreshStatusText(app);
 
-	if (app->VolumeCount == 0)
-		SetMessage(app, LoadTempString(IDS_NO_VOLUMES_FOUND, L"No actionable BitLocker volumes were found."));
-	else if (!app->Elevated)
-		SetMessage(app, LoadTempString(IDS_NOT_ELEVATED, L"Not elevated. Lock and turn-off operations may require administrator rights."));
-	else
-		SetMessage(app, LoadTempString(IDS_READY, L"Ready."));
-
-	SetBusy(app, FALSE, app->VolumeCount == 0 ?
-		LoadTempString(IDS_NO_VOLUMES_FOUND, L"No actionable BitLocker volumes were found.") : NULL);
-	if (app->VolumeCount > 0)
-	{
-		if (!app->Elevated)
-			SetMessage(app, LoadTempString(IDS_NOT_ELEVATED, L"Not elevated. Lock and turn-off operations may require administrator rights."));
-		else
-			SetMessage(app, LoadTempString(IDS_READY, L"Ready."));
-	}
+	SetBusy(app, FALSE, NULL);
+	SetReadyMessage(app);
 }
 
 static void ClearSecretEdit(FVE_GUI_APP* app)
@@ -654,10 +755,52 @@ static void ClearSecretEdit(FVE_GUI_APP* app)
 	WCHAR secret[FVE_GUI_MAX_SECRET];
 	int length;
 
+	if (app == NULL || app->SecretEdit == NULL)
+		return;
+
 	length = GetWindowTextW(app->SecretEdit, secret, ARRAYSIZE(secret));
 	if (length > 0)
 		SecureZeroMemory(secret, sizeof(secret));
 	SetWindowTextW(app->SecretEdit, L"");
+}
+
+static void ClearEncryptPasswordEdits(FVE_GUI_APP* app)
+{
+	WCHAR secret[FVE_GUI_MAX_SECRET];
+	int length;
+
+	if (app == NULL)
+		return;
+
+	if (app->EncryptPasswordEdit != NULL)
+	{
+		length = GetWindowTextW(app->EncryptPasswordEdit, secret, ARRAYSIZE(secret));
+		if (length > 0)
+			SecureZeroMemory(secret, sizeof(secret));
+		SetWindowTextW(app->EncryptPasswordEdit, L"");
+	}
+
+	if (app->EncryptConfirmEdit != NULL)
+	{
+		length = GetWindowTextW(app->EncryptConfirmEdit, secret, ARRAYSIZE(secret));
+		if (length > 0)
+			SecureZeroMemory(secret, sizeof(secret));
+		SetWindowTextW(app->EncryptConfirmEdit, L"");
+	}
+}
+
+static void ClearRecoveryKeyEdit(FVE_GUI_APP* app)
+{
+	WCHAR recoveryPassword[FVE_LIB_RECOVERY_PASSWORD_CCH];
+	int length;
+
+	if (app == NULL || app->RecoveryKeyEdit == NULL)
+		return;
+
+	length = GetWindowTextW(app->RecoveryKeyEdit, recoveryPassword, ARRAYSIZE(recoveryPassword));
+	if (length > 0)
+		SecureZeroMemory(recoveryPassword, sizeof(recoveryPassword));
+	SetWindowTextW(app->RecoveryKeyEdit, L"");
 }
 
 static BOOL ReadSecret(FVE_GUI_APP* app, PWSTR output, size_t cchOutput)
@@ -675,6 +818,41 @@ static BOOL ReadSecret(FVE_GUI_APP* app, PWSTR output, size_t cchOutput)
 	return TRUE;
 }
 
+static BOOL ReadEncryptPasswordPair(FVE_GUI_APP* app, PWSTR password, size_t cchPassword)
+{
+	WCHAR confirm[FVE_GUI_MAX_SECRET];
+	BOOL ok = FALSE;
+
+	if (GetWindowTextW(app->EncryptPasswordEdit, password, (int)cchPassword) <= 0 ||
+		GetWindowTextW(app->EncryptConfirmEdit, confirm, ARRAYSIZE(confirm)) <= 0)
+	{
+		MessageBoxW(
+			app->MainWindow,
+			LoadTempString(IDS_MISSING_PASSWORD_MESSAGE, L"Enter and confirm the password first."),
+			LoadTempString(IDS_MISSING_KEY_TITLE, L"Missing key"),
+			MB_OK | MB_ICONWARNING);
+		goto cleanup;
+	}
+
+	if (lstrcmpW(password, confirm) != 0)
+	{
+		MessageBoxW(
+			app->MainWindow,
+			LoadTempString(IDS_PASSWORD_MISMATCH_MESSAGE, L"The two passwords do not match."),
+			LoadTempString(IDS_PASSWORD_MISMATCH_TITLE, L"Password mismatch"),
+			MB_OK | MB_ICONWARNING);
+		goto cleanup;
+	}
+
+	ok = TRUE;
+
+cleanup:
+	SecureZeroMemory(confirm, sizeof(confirm));
+	if (!ok && password != NULL)
+		SecureZeroMemory(password, cchPassword * sizeof(password[0]));
+	return ok;
+}
+
 static void RunUnlock(FVE_GUI_APP* app)
 {
 	WCHAR volumePath[4];
@@ -682,7 +860,7 @@ static void RunUnlock(FVE_GUI_APP* app)
 	BOOL recovery;
 	HRESULT hr;
 
-	if (!GetSelectedPath(app, volumePath, ARRAYSIZE(volumePath)) ||
+	if (!GetSelectedDecryptPath(app, volumePath, ARRAYSIZE(volumePath)) ||
 		!ReadSecret(app, secret, ARRAYSIZE(secret)))
 		return;
 
@@ -715,7 +893,7 @@ static void RunLock(FVE_GUI_APP* app)
 	WCHAR volumePath[4];
 	HRESULT hr;
 
-	if (!GetSelectedPath(app, volumePath, ARRAYSIZE(volumePath)))
+	if (!GetSelectedDecryptPath(app, volumePath, ARRAYSIZE(volumePath)))
 		return;
 
 	if (MessageBoxW(
@@ -742,11 +920,11 @@ static void RunLock(FVE_GUI_APP* app)
 
 static void RunTurnOffBitLocker(FVE_GUI_APP* app)
 {
-	const FVE_GUI_VOLUME_ENTRY* volume = GetSelectedVolume(app);
+	const FVE_GUI_VOLUME_ENTRY* volume = GetSelectedDecryptVolume(app);
 	WCHAR volumePath[4];
 	HRESULT hr;
 
-	if (volume == NULL || !GetSelectedPath(app, volumePath, ARRAYSIZE(volumePath)))
+	if (volume == NULL || !GetSelectedDecryptPath(app, volumePath, ARRAYSIZE(volumePath)))
 		return;
 
 	if (volume->HasStatus && SUCCEEDED(volume->StatusHr))
@@ -802,9 +980,217 @@ static void RunTurnOffBitLocker(FVE_GUI_APP* app)
 	SetMessage(app, LoadTempString(IDS_DECRYPTION_STARTED, L"BitLocker decryption started."));
 }
 
+static void RunEncrypt(FVE_GUI_APP* app)
+{
+	const FVE_GUI_VOLUME_ENTRY* volume = GetSelectedEncryptVolume(app);
+	WCHAR volumePath[4];
+	WCHAR password[FVE_GUI_MAX_SECRET];
+	WCHAR recoveryPassword[FVE_LIB_RECOVERY_PASSWORD_CCH];
+	HRESULT hr;
+
+	if (volume == NULL || !GetSelectedEncryptPath(app, volumePath, ARRAYSIZE(volumePath)) ||
+		!ReadEncryptPasswordPair(app, password, ARRAYSIZE(password)))
+		return;
+
+	if (volume->HasStatus && SUCCEEDED(volume->StatusHr))
+	{
+		if (volume->Info.LockStatus == FVE_LIB_LOCK_LOCKED)
+		{
+			MessageBoxW(
+				app->MainWindow,
+				LoadTempString(IDS_UNLOCK_BEFORE_ENCRYPT_MESSAGE, L"Unlock the volume before turning on BitLocker."),
+				LoadTempString(IDS_VOLUME_LOCKED_TITLE, L"Volume locked"),
+				MB_OK | MB_ICONWARNING);
+			SecureZeroMemory(password, sizeof(password));
+			return;
+		}
+		if (volume->Info.VolumeStatus == FVE_LIB_VOLUME_FULLY_ENCRYPTED)
+		{
+			MessageBoxW(
+				app->MainWindow,
+				LoadTempString(IDS_ALREADY_ENCRYPTED_MESSAGE, L"The selected volume is already fully encrypted."),
+				LoadTempString(IDS_BITLOCKER_TITLE, L"BitLocker"),
+				MB_OK | MB_ICONINFORMATION);
+			SecureZeroMemory(password, sizeof(password));
+			return;
+		}
+		if (volume->Info.VolumeStatus == FVE_LIB_VOLUME_ENCRYPTION_IN_PROGRESS)
+		{
+			MessageBoxW(
+				app->MainWindow,
+				LoadTempString(IDS_ENCRYPTION_IN_PROGRESS_MESSAGE, L"BitLocker encryption is already in progress."),
+				LoadTempString(IDS_BITLOCKER_TITLE, L"BitLocker"),
+				MB_OK | MB_ICONINFORMATION);
+			SecureZeroMemory(password, sizeof(password));
+			return;
+		}
+	}
+
+	if (MessageBoxW(
+		app->MainWindow,
+		LoadTempString(IDS_CONFIRM_ENCRYPT_MESSAGE, L"Turn on BitLocker for the selected volume?\r\n\r\nThis starts encryption and generates a recovery key."),
+		LoadTempString(IDS_CONFIRM_ENCRYPT_TITLE, L"Confirm BitLocker turn on"),
+		MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES)
+	{
+		SecureZeroMemory(password, sizeof(password));
+		return;
+	}
+
+	ClearRecoveryKeyEdit(app);
+	SetBusy(app, TRUE, LoadTempString(IDS_STARTING_ENCRYPTION, L"Starting encryption..."));
+	hr = FveLibEncryptWithPasswordByPath(
+		volumePath,
+		password,
+		recoveryPassword,
+		ARRAYSIZE(recoveryPassword));
+	SecureZeroMemory(password, sizeof(password));
+	ClearEncryptPasswordEdits(app);
+
+	if (FAILED(hr))
+	{
+		SecureZeroMemory(recoveryPassword, sizeof(recoveryPassword));
+		SetBusy(app, FALSE, LoadTempString(IDS_ENCRYPT_FAILED, L"Encryption failed."));
+		ShowHrError(app->MainWindow, LoadTempString(IDS_OPERATION_ENCRYPT, L"Turn on BitLocker"), hr);
+		RefreshVolumes(app, TRUE);
+		return;
+	}
+
+	SetWindowTextW(app->RecoveryKeyEdit, recoveryPassword);
+	SecureZeroMemory(recoveryPassword, sizeof(recoveryPassword));
+	SetBusy(app, FALSE, LoadTempString(IDS_ENCRYPTION_STARTED, L"BitLocker encryption started. Save or copy the recovery key."));
+	RefreshVolumes(app, TRUE);
+	SetMessage(app, LoadTempString(IDS_ENCRYPTION_STARTED, L"BitLocker encryption started. Save or copy the recovery key."));
+}
+
+static void CopyRecoveryKey(FVE_GUI_APP* app)
+{
+	int length;
+	HGLOBAL memory;
+	PWSTR target;
+	WCHAR recoveryPassword[FVE_LIB_RECOVERY_PASSWORD_CCH];
+
+	if (app == NULL || app->RecoveryKeyEdit == NULL)
+		return;
+
+	length = GetWindowTextW(app->RecoveryKeyEdit, recoveryPassword, ARRAYSIZE(recoveryPassword));
+	if (length <= 0)
+		return;
+
+	if (!OpenClipboard(app->MainWindow))
+	{
+		ShowHrError(app->MainWindow, LoadTempString(IDS_OPERATION_COPY_RECOVERY, L"Copy recovery key"), HRESULT_FROM_WIN32(GetLastError()));
+		SecureZeroMemory(recoveryPassword, sizeof(recoveryPassword));
+		return;
+	}
+
+	memory = GlobalAlloc(GMEM_MOVEABLE, ((SIZE_T)length + 1u) * sizeof(WCHAR));
+	if (memory == NULL)
+	{
+		CloseClipboard();
+		ShowHrError(app->MainWindow, LoadTempString(IDS_OPERATION_COPY_RECOVERY, L"Copy recovery key"), HRESULT_FROM_WIN32(GetLastError()));
+		SecureZeroMemory(recoveryPassword, sizeof(recoveryPassword));
+		return;
+	}
+
+	target = (PWSTR)GlobalLock(memory);
+	if (target == NULL)
+	{
+		GlobalFree(memory);
+		CloseClipboard();
+		ShowHrError(app->MainWindow, LoadTempString(IDS_OPERATION_COPY_RECOVERY, L"Copy recovery key"), HRESULT_FROM_WIN32(GetLastError()));
+		SecureZeroMemory(recoveryPassword, sizeof(recoveryPassword));
+		return;
+	}
+
+	StringCchCopyW(target, (size_t)length + 1u, recoveryPassword);
+	GlobalUnlock(memory);
+	EmptyClipboard();
+	if (SetClipboardData(CF_UNICODETEXT, memory) == NULL)
+	{
+		GlobalFree(memory);
+		CloseClipboard();
+		ShowHrError(app->MainWindow, LoadTempString(IDS_OPERATION_COPY_RECOVERY, L"Copy recovery key"), HRESULT_FROM_WIN32(GetLastError()));
+		SecureZeroMemory(recoveryPassword, sizeof(recoveryPassword));
+		return;
+	}
+
+	CloseClipboard();
+	SecureZeroMemory(recoveryPassword, sizeof(recoveryPassword));
+	SetMessage(app, LoadTempString(IDS_RECOVERY_KEY_COPIED, L"Recovery key copied."));
+}
+
+static void ShowControl(HWND control, BOOL visible)
+{
+	if (control != NULL)
+		ShowWindow(control, visible ? SW_SHOW : SW_HIDE);
+}
+
+static void UpdateTabVisibility(FVE_GUI_APP* app)
+{
+	BOOL decryptVisible;
+	BOOL encryptVisible;
+
+	if (app == NULL)
+		return;
+
+	decryptVisible = app->ActiveTab == FVE_GUI_TAB_DECRYPT;
+	encryptVisible = app->ActiveTab == FVE_GUI_TAB_ENCRYPT;
+
+	ShowControl(app->VolumeLabel, decryptVisible);
+	ShowControl(app->VolumeCombo, decryptVisible);
+	ShowControl(app->RefreshButton, decryptVisible);
+	ShowControl(app->SecretLabel, decryptVisible);
+	ShowControl(app->SecretEdit, decryptVisible);
+	ShowControl(app->RecoveryCheck, decryptVisible);
+	ShowControl(app->UnlockButton, decryptVisible);
+	ShowControl(app->LockButton, decryptVisible);
+	ShowControl(app->DecryptButton, decryptVisible);
+	ShowControl(app->DecryptStatusStatic, decryptVisible);
+
+	ShowControl(app->EncryptVolumeLabel, encryptVisible);
+	ShowControl(app->EncryptVolumeCombo, encryptVisible);
+	ShowControl(app->EncryptRefreshButton, encryptVisible);
+	ShowControl(app->EncryptPasswordLabel, encryptVisible);
+	ShowControl(app->EncryptPasswordEdit, encryptVisible);
+	ShowControl(app->EncryptConfirmLabel, encryptVisible);
+	ShowControl(app->EncryptConfirmEdit, encryptVisible);
+	ShowControl(app->EncryptButton, encryptVisible);
+	ShowControl(app->RecoveryKeyLabel, encryptVisible);
+	ShowControl(app->RecoveryKeyEdit, encryptVisible);
+	ShowControl(app->CopyRecoveryButton, encryptVisible);
+}
+
+static void SetActiveTab(FVE_GUI_APP* app, int activeTab)
+{
+	if (app == NULL)
+		return;
+
+	if (activeTab != FVE_GUI_TAB_ENCRYPT)
+		activeTab = FVE_GUI_TAB_DECRYPT;
+
+	app->ActiveTab = activeTab;
+	if (app->TabControl != NULL)
+		SendMessageW(app->TabControl, TCM_SETCURSEL, (WPARAM)activeTab, 0);
+	UpdateTabVisibility(app);
+	UpdateButtons(app);
+	SetReadyMessage(app);
+}
+
+static void AddTabItem(HWND tabControl, int index, PWSTR text)
+{
+	TCITEMW item;
+
+	ZeroMemory(&item, sizeof(item));
+	item.mask = TCIF_TEXT;
+	item.pszText = text;
+	SendMessageW(tabControl, TCM_INSERTITEMW, (WPARAM)index, (LPARAM)&item);
+}
+
 static void LayoutControls(HWND window, FVE_GUI_APP* app)
 {
 	RECT client;
+	RECT tabRect;
+	RECT pageRect;
 	int margin;
 	int gap;
 	int contentLeft;
@@ -817,6 +1203,19 @@ static void LayoutControls(HWND window, FVE_GUI_APP* app)
 	int top;
 	int keyTop;
 	int buttonsTop;
+	int decryptStatusTop;
+	int decryptStatusHeight;
+	int tabTop;
+	int tabBottom;
+	int pageLeft;
+	int pageTop;
+	int pageRight;
+	int pageBottom;
+	int pageMargin;
+	int passwordTop;
+	int confirmTop;
+	int encryptButtonTop;
+	int recoveryTop;
 	int messageTop;
 	int statusLabelWidth;
 	int clientWidth;
@@ -839,7 +1238,7 @@ static void LayoutControls(HWND window, FVE_GUI_APP* app)
 	clientWidth = client.right - client.left;
 	clientHeight = client.bottom - client.top;
 
-	margin = ScaleForWindow(window, 28);
+	margin = ScaleForWindow(window, 22);
 	gap = ScaleForWindow(window, 12);
 	labelWidth = ScaleForWindow(window, 92);
 	topRowHeight = ScaleForWindow(window, 24);
@@ -864,29 +1263,55 @@ static void LayoutControls(HWND window, FVE_GUI_APP* app)
 		contentLeft = margin;
 	}
 
-	top = ScaleForWindow(window, 28);
+	tabTop = ScaleForWindow(window, 12);
 	messageTop = clientHeight - margin - rowHeight;
-	buttonsTop = messageTop - ScaleForWindow(window, 30) - buttonHeight;
+	tabBottom = messageTop - gap;
+	if (tabBottom < tabTop + ScaleForWindow(window, 210))
+		tabBottom = tabTop + ScaleForWindow(window, 210);
+
+	MoveWindow(app->TabControl, contentLeft, tabTop, contentWidth, tabBottom - tabTop, TRUE);
+	SetWindowPos(app->TabControl, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+	tabRect.left = contentLeft;
+	tabRect.top = tabTop;
+	tabRect.right = contentLeft + contentWidth;
+	tabRect.bottom = tabBottom;
+	pageRect = tabRect;
+	SendMessageW(app->TabControl, TCM_ADJUSTRECT, FALSE, (LPARAM)&pageRect);
+	pageMargin = ScaleForWindow(window, 14);
+	pageLeft = pageRect.left + pageMargin;
+	pageTop = pageRect.top + ScaleForWindow(window, 14);
+	pageRight = pageRect.right - pageMargin;
+	pageBottom = pageRect.bottom - ScaleForWindow(window, 10);
+
+	top = pageTop;
+	buttonsTop = pageBottom - buttonHeight;
 	keyTop = buttonsTop - ScaleForWindow(window, 26) - rowHeight;
 	if (keyTop < top + topRowHeight + ScaleForWindow(window, 34))
 		keyTop = top + topRowHeight + ScaleForWindow(window, 34);
 
-	MoveWindow(app->VolumeLabel, contentLeft, top + ScaleForWindow(window, 3), labelWidth, topRowHeight, TRUE);
+	MoveWindow(app->VolumeLabel, pageLeft, top + ScaleForWindow(window, 3), labelWidth, topRowHeight, TRUE);
 
-	fieldLeft = contentLeft + labelWidth;
-	rightColumnLeft = contentLeft + contentWidth - rightColumnWidth;
+	fieldLeft = pageLeft + labelWidth;
+	rightColumnLeft = pageRight - rightColumnWidth;
 	comboWidth = rightColumnLeft - gap - fieldLeft;
 	if (comboWidth < ScaleForWindow(window, 220))
 		comboWidth = ScaleForWindow(window, 220);
 	MoveWindow(app->VolumeCombo, fieldLeft, top, comboWidth, ScaleForWindow(window, 220), TRUE);
 	MoveWindow(app->RefreshButton, rightColumnLeft, top, refreshWidth, topRowHeight, TRUE);
 
-	MoveWindow(app->SecretLabel, contentLeft, keyTop + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
+	decryptStatusTop = top + ScaleForWindow(window, 44);
+	decryptStatusHeight = keyTop - decryptStatusTop - ScaleForWindow(window, 8);
+	if (decryptStatusHeight < rowHeight)
+		decryptStatusHeight = rowHeight;
+	MoveWindow(app->DecryptStatusStatic, fieldLeft, decryptStatusTop, pageRight - fieldLeft, decryptStatusHeight, TRUE);
+
+	MoveWindow(app->SecretLabel, pageLeft, keyTop + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
 	MoveWindow(app->SecretEdit, fieldLeft, keyTop, comboWidth, topRowHeight, TRUE);
 	MoveWindow(app->RecoveryCheck, rightColumnLeft, keyTop + ScaleForWindow(window, 2), recoveryWidth, rowHeight, TRUE);
 
 	actionLeft = fieldLeft;
-	actionAreaWidth = contentWidth - labelWidth;
+	actionAreaWidth = pageRight - fieldLeft;
 	actionTotalWidth = unlockWidth + lockWidth + decryptWidth + actionGap * 2;
 	if (actionTotalWidth > actionAreaWidth)
 	{
@@ -900,13 +1325,42 @@ static void LayoutControls(HWND window, FVE_GUI_APP* app)
 	MoveWindow(app->LockButton, actionLeft + unlockWidth + actionGap, buttonsTop, lockWidth, buttonHeight, TRUE);
 	MoveWindow(app->DecryptButton, actionLeft + unlockWidth + actionGap + lockWidth + actionGap, buttonsTop, decryptWidth, buttonHeight, TRUE);
 
+	MoveWindow(app->EncryptVolumeLabel, pageLeft, top + ScaleForWindow(window, 3), labelWidth, topRowHeight, TRUE);
+	MoveWindow(app->EncryptVolumeCombo, fieldLeft, top, comboWidth, ScaleForWindow(window, 220), TRUE);
+	MoveWindow(app->EncryptRefreshButton, rightColumnLeft, top, refreshWidth, topRowHeight, TRUE);
+
+	passwordTop = top + ScaleForWindow(window, 44);
+	confirmTop = passwordTop + ScaleForWindow(window, 38);
+	encryptButtonTop = confirmTop + ScaleForWindow(window, 44);
+	recoveryTop = encryptButtonTop + ScaleForWindow(window, 48);
+	if (recoveryTop + topRowHeight > pageBottom)
+		recoveryTop = pageBottom - topRowHeight;
+	if (encryptButtonTop + buttonHeight > recoveryTop - gap)
+		encryptButtonTop = recoveryTop - gap - buttonHeight;
+
+	MoveWindow(app->EncryptPasswordLabel, pageLeft, passwordTop + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
+	MoveWindow(app->EncryptPasswordEdit, fieldLeft, passwordTop, comboWidth, topRowHeight, TRUE);
+	MoveWindow(app->EncryptConfirmLabel, pageLeft, confirmTop + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
+	MoveWindow(app->EncryptConfirmEdit, fieldLeft, confirmTop, comboWidth, topRowHeight, TRUE);
+	MoveWindow(app->EncryptButton, fieldLeft, encryptButtonTop, ScaleForWindow(window, 170), buttonHeight, TRUE);
+	MoveWindow(app->RecoveryKeyLabel, pageLeft, recoveryTop + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
+	MoveWindow(app->RecoveryKeyEdit, fieldLeft, recoveryTop, comboWidth, topRowHeight, TRUE);
+	MoveWindow(app->CopyRecoveryButton, rightColumnLeft, recoveryTop, recoveryWidth, topRowHeight, TRUE);
+
 	MoveWindow(app->StatusLabel, contentLeft, messageTop + ScaleForWindow(window, 4), statusLabelWidth, rowHeight, TRUE);
 	MoveWindow(app->MessageStatic, contentLeft + statusLabelWidth, messageTop + ScaleForWindow(window, 4), contentWidth - statusLabelWidth, rowHeight, TRUE);
+	UpdateTabVisibility(app);
 }
 
 static BOOL CreateControls(FVE_GUI_APP* app)
 {
 	app->Font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+	app->TabControl = CreateChildWindow(app, WC_TABCONTROLW, L"", WS_TABSTOP | WS_CLIPSIBLINGS, 0, IDC_TAB_CONTROL);
+	if (app->TabControl != NULL)
+	{
+		AddTabItem(app->TabControl, FVE_GUI_TAB_DECRYPT, app->Text.DecryptTab);
+		AddTabItem(app->TabControl, FVE_GUI_TAB_ENCRYPT, app->Text.EncryptTab);
+	}
 	app->VolumeLabel = CreateChildWindow(app, L"STATIC", app->Text.VolumeLabel, 0, 0, -1);
 	app->VolumeCombo = CreateChildWindow(app, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, IDC_VOLUME_COMBO);
 	app->RefreshButton = CreateChildWindow(app, L"BUTTON", app->Text.RefreshButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_REFRESH_BUTTON);
@@ -916,10 +1370,23 @@ static BOOL CreateControls(FVE_GUI_APP* app)
 	app->UnlockButton = CreateChildWindow(app, L"BUTTON", app->Text.UnlockButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_UNLOCK_BUTTON);
 	app->LockButton = CreateChildWindow(app, L"BUTTON", app->Text.LockButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_LOCK_BUTTON);
 	app->DecryptButton = CreateChildWindow(app, L"BUTTON", app->Text.TurnOffButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_DECRYPT_BUTTON);
+	app->DecryptStatusStatic = CreateChildWindow(app, L"STATIC", L"", SS_LEFT | SS_NOPREFIX, 0, IDC_DECRYPT_STATUS_STATIC);
+	app->EncryptVolumeLabel = CreateChildWindow(app, L"STATIC", app->Text.VolumeLabel, 0, 0, -1);
+	app->EncryptVolumeCombo = CreateChildWindow(app, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, IDC_ENCRYPT_VOLUME_COMBO);
+	app->EncryptRefreshButton = CreateChildWindow(app, L"BUTTON", app->Text.RefreshButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_ENCRYPT_REFRESH_BUTTON);
+	app->EncryptPasswordLabel = CreateChildWindow(app, L"STATIC", app->Text.EncryptPasswordLabel, 0, 0, -1);
+	app->EncryptPasswordEdit = CreateChildWindow(app, L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, IDC_ENCRYPT_PASSWORD_EDIT);
+	app->EncryptConfirmLabel = CreateChildWindow(app, L"STATIC", app->Text.ConfirmPasswordLabel, 0, 0, -1);
+	app->EncryptConfirmEdit = CreateChildWindow(app, L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, IDC_ENCRYPT_CONFIRM_EDIT);
+	app->EncryptButton = CreateChildWindow(app, L"BUTTON", app->Text.EncryptButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_ENCRYPT_BUTTON);
+	app->RecoveryKeyLabel = CreateChildWindow(app, L"STATIC", app->Text.RecoveryKeyLabel, 0, 0, -1);
+	app->RecoveryKeyEdit = CreateChildWindow(app, L"EDIT", L"", ES_AUTOHSCROLL | ES_READONLY | WS_TABSTOP, WS_EX_CLIENTEDGE, IDC_RECOVERY_KEY_EDIT);
+	app->CopyRecoveryButton = CreateChildWindow(app, L"BUTTON", app->Text.CopyButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_COPY_RECOVERY_BUTTON);
 	app->StatusLabel = CreateChildWindow(app, L"STATIC", app->Text.StatusLabel, 0, 0, IDC_STATUS_LABEL);
 	app->MessageStatic = CreateChildWindow(app, L"STATIC", L"", 0, 0, IDC_MESSAGE_STATIC);
 
-	return app->VolumeLabel != NULL &&
+	return app->TabControl != NULL &&
+		app->VolumeLabel != NULL &&
 		app->VolumeCombo != NULL &&
 		app->RefreshButton != NULL &&
 		app->SecretLabel != NULL &&
@@ -928,6 +1395,18 @@ static BOOL CreateControls(FVE_GUI_APP* app)
 		app->UnlockButton != NULL &&
 		app->LockButton != NULL &&
 		app->DecryptButton != NULL &&
+		app->DecryptStatusStatic != NULL &&
+		app->EncryptVolumeLabel != NULL &&
+		app->EncryptVolumeCombo != NULL &&
+		app->EncryptRefreshButton != NULL &&
+		app->EncryptPasswordLabel != NULL &&
+		app->EncryptPasswordEdit != NULL &&
+		app->EncryptConfirmLabel != NULL &&
+		app->EncryptConfirmEdit != NULL &&
+		app->EncryptButton != NULL &&
+		app->RecoveryKeyLabel != NULL &&
+		app->RecoveryKeyEdit != NULL &&
+		app->CopyRecoveryButton != NULL &&
 		app->StatusLabel != NULL &&
 		app->MessageStatic != NULL;
 }
@@ -943,6 +1422,7 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 		CREATESTRUCTW* create = (CREATESTRUCTW*)lParam;
 		app = (FVE_GUI_APP*)create->lpCreateParams;
 		app->MainWindow = window;
+		app->ActiveTab = FVE_GUI_TAB_DECRYPT;
 		SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)app);
 		if (!CreateControls(app))
 			return -1;
@@ -958,7 +1438,7 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 	{
 		MINMAXINFO* minMax = (MINMAXINFO*)lParam;
 		minMax->ptMinTrackSize.x = ScaleForWindow(window, 560);
-		minMax->ptMinTrackSize.y = ScaleForWindow(window, 280);
+		minMax->ptMinTrackSize.y = ScaleForWindow(window, 340);
 		return 0;
 	}
 	case WM_SETCURSOR:
@@ -972,19 +1452,53 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 		if (app != NULL)
 		{
 			HWND control = (HWND)lParam;
+			if (control == app->RecoveryKeyEdit)
+				return (LRESULT)PrepareWindowControlBackground((HDC)wParam);
 			if (control == app->VolumeLabel ||
 				control == app->SecretLabel ||
 				control == app->StatusLabel ||
 				control == app->MessageStatic ||
-				control == app->RecoveryCheck)
+				control == app->RecoveryCheck ||
+				control == app->DecryptStatusStatic ||
+				control == app->EncryptVolumeLabel ||
+				control == app->EncryptPasswordLabel ||
+				control == app->EncryptConfirmLabel ||
+				control == app->RecoveryKeyLabel)
 			{
 				return (LRESULT)PrepareTransparentControlBackground((HDC)wParam);
+			}
+		}
+		break;
+	case WM_CTLCOLOREDIT:
+		if (app != NULL)
+		{
+			HWND control = (HWND)lParam;
+			if (control == app->SecretEdit ||
+				control == app->EncryptPasswordEdit ||
+				control == app->EncryptConfirmEdit ||
+				control == app->RecoveryKeyEdit)
+			{
+				return (LRESULT)PrepareWindowControlBackground((HDC)wParam);
 			}
 		}
 		break;
 	case WM_CTLCOLORBTN:
 		if (app != NULL && (HWND)lParam == app->RecoveryCheck)
 			return (LRESULT)PrepareTransparentControlBackground((HDC)wParam);
+		break;
+	case WM_NOTIFY:
+		if (app != NULL)
+		{
+			NMHDR* notify = (NMHDR*)lParam;
+			if (notify != NULL &&
+				notify->hwndFrom == app->TabControl &&
+				notify->code == TCN_SELCHANGE)
+			{
+				LRESULT selection = SendMessageW(app->TabControl, TCM_GETCURSEL, 0, 0);
+				SetActiveTab(app, selection == FVE_GUI_TAB_ENCRYPT ? FVE_GUI_TAB_ENCRYPT : FVE_GUI_TAB_DECRYPT);
+				return 0;
+			}
+		}
 		break;
 	case WM_COMMAND:
 		if (app == NULL)
@@ -1000,7 +1514,18 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 			if (HIWORD(wParam) == EN_CHANGE)
 				UpdateButtons(app);
 			return 0;
+		case IDC_ENCRYPT_VOLUME_COMBO:
+			if (HIWORD(wParam) == CBN_SELCHANGE)
+				RefreshStatusText(app);
+			return 0;
+		case IDC_ENCRYPT_PASSWORD_EDIT:
+		case IDC_ENCRYPT_CONFIRM_EDIT:
+		case IDC_RECOVERY_KEY_EDIT:
+			if (HIWORD(wParam) == EN_CHANGE)
+				UpdateButtons(app);
+			return 0;
 		case IDC_REFRESH_BUTTON:
+		case IDC_ENCRYPT_REFRESH_BUTTON:
 			RefreshVolumes(app, TRUE);
 			return 0;
 		case IDC_UNLOCK_BUTTON:
@@ -1012,12 +1537,20 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 		case IDC_DECRYPT_BUTTON:
 			RunTurnOffBitLocker(app);
 			return 0;
+		case IDC_ENCRYPT_BUTTON:
+			RunEncrypt(app);
+			return 0;
+		case IDC_COPY_RECOVERY_BUTTON:
+			CopyRecoveryKey(app);
+			return 0;
 		default:
 			break;
 		}
 		break;
 	case WM_DESTROY:
 		ClearSecretEdit(&gApp);
+		ClearEncryptPasswordEdits(&gApp);
+		ClearRecoveryKeyEdit(&gApp);
 		PostQuitMessage(0);
 		return 0;
 	default:
@@ -1076,9 +1609,15 @@ wWinMain(_In_ HINSTANCE hInstance,
 	HRESULT hr;
 	HWND window;
 	MSG message;
+	INITCOMMONCONTROLSEX commonControls;
 
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
+
+	ZeroMemory(&commonControls, sizeof(commonControls));
+	commonControls.dwSize = sizeof(commonControls);
+	commonControls.dwICC = ICC_TAB_CLASSES;
+	InitCommonControlsEx(&commonControls);
 
 	ZeroMemory(&gApp, sizeof(gApp));
 	gApp.Instance = hInstance;
@@ -1107,7 +1646,7 @@ wWinMain(_In_ HINSTANCE hInstance,
 		CW_USEDEFAULT,
 		CW_USEDEFAULT,
 		ScaleForWindow(NULL, 700),
-		ScaleForWindow(NULL, 300),
+		ScaleForWindow(NULL, 360),
 		NULL,
 		NULL,
 		hInstance,
