@@ -121,6 +121,7 @@ typedef struct FVE_GUI_APP
 	HWND StatusLabel;
 	HWND MessageStatic;
 	HFONT Font;
+	HBRUSH TabBodyBrush;
 	BOOL Busy;
 	BOOL Elevated;
 	int ActiveTab;
@@ -461,12 +462,57 @@ static void SetMessage(FVE_GUI_APP* app, PCWSTR message)
 		SetWindowTextW(app->MessageStatic, message != NULL ? message : L"");
 }
 
-static HBRUSH PrepareTransparentControlBackground(HDC dc)
+static void UpdateTabBodyBrush(FVE_GUI_APP* app)
+{
+	HDC tabDC;
+	HDC memDC;
+	HBITMAP bmp;
+	HBITMAP oldBmp;
+	RECT tabRect;
+	RECT bodyRect;
+	COLORREF color;
+
+	if (app->TabBodyBrush != NULL)
+	{
+		DeleteObject(app->TabBodyBrush);
+		app->TabBodyBrush = NULL;
+	}
+
+	if (app->TabControl == NULL)
+		return;
+
+	GetClientRect(app->TabControl, &tabRect);
+	if (tabRect.right <= 0 || tabRect.bottom <= 0)
+		return;
+
+	bodyRect = tabRect;
+	SendMessageW(app->TabControl, TCM_ADJUSTRECT, FALSE, (LPARAM)&bodyRect);
+
+	tabDC = GetDC(app->TabControl);
+	if (tabDC == NULL)
+		return;
+
+	memDC = CreateCompatibleDC(tabDC);
+	bmp = CreateCompatibleBitmap(tabDC, tabRect.right, tabRect.bottom);
+	oldBmp = (HBITMAP)SelectObject(memDC, bmp);
+
+	SendMessageW(app->TabControl, WM_PRINTCLIENT, (WPARAM)memDC, PRF_CLIENT);
+	color = GetPixel(memDC, (bodyRect.left + bodyRect.right) / 2, (bodyRect.top + bodyRect.bottom) / 2);
+
+	SelectObject(memDC, oldBmp);
+	DeleteObject(bmp);
+	DeleteDC(memDC);
+	ReleaseDC(app->TabControl, tabDC);
+
+	if (color != CLR_INVALID)
+		app->TabBodyBrush = CreateSolidBrush(color);
+}
+
+static HBRUSH PrepareTabControlBackground(HDC dc, HBRUSH tabBrush)
 {
 	SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
-	SetBkColor(dc, GetSysColor(COLOR_WINDOW));
 	SetBkMode(dc, TRANSPARENT);
-	return GetSysColorBrush(COLOR_WINDOW);
+	return tabBrush != NULL ? tabBrush : GetSysColorBrush(COLOR_BTNFACE);
 }
 
 static HBRUSH PrepareWindowControlBackground(HDC dc)
@@ -1504,12 +1550,16 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 			return -1;
 		SetActiveTab(app, app->ActiveTab);
 		LayoutControls(window, app);
+		UpdateTabBodyBrush(app);
 		RefreshVolumes(app, FALSE);
 		return 0;
 	}
 	case WM_SIZE:
 		if (app != NULL)
+		{
 			LayoutControls(window, app);
+			UpdateTabBodyBrush(app);
+		}
 		return 0;
 	case WM_GETMINMAXINFO:
 	{
@@ -1533,8 +1583,6 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 				return (LRESULT)PrepareWindowControlBackground((HDC)wParam);
 			if (control == app->VolumeLabel ||
 				control == app->SecretLabel ||
-				control == app->StatusLabel ||
-				control == app->MessageStatic ||
 				control == app->RecoveryCheck ||
 				control == app->DecryptStatusStatic ||
 				control == app->EncryptVolumeLabel ||
@@ -1542,7 +1590,14 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 				control == app->EncryptConfirmLabel ||
 				control == app->RecoveryKeyLabel)
 			{
-				return (LRESULT)PrepareTransparentControlBackground((HDC)wParam);
+				return (LRESULT)PrepareTabControlBackground((HDC)wParam, app->TabBodyBrush);
+			}
+			if (control == app->StatusLabel ||
+				control == app->MessageStatic)
+			{
+				SetTextColor((HDC)wParam, GetSysColor(COLOR_WINDOWTEXT));
+				SetBkMode((HDC)wParam, TRANSPARENT);
+				return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
 			}
 		}
 		break;
@@ -1561,7 +1616,7 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 		break;
 	case WM_CTLCOLORBTN:
 		if (app != NULL && (HWND)lParam == app->RecoveryCheck)
-			return (LRESULT)PrepareTransparentControlBackground((HDC)wParam);
+			return (LRESULT)PrepareTabControlBackground((HDC)wParam, app->TabBodyBrush);
 		break;
 	case WM_NOTIFY:
 		if (app != NULL)
@@ -1628,6 +1683,11 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 		ClearSecretEdit(&gApp);
 		ClearEncryptPasswordEdits(&gApp);
 		ClearRecoveryKeyEdit(&gApp);
+		if (gApp.TabBodyBrush != NULL)
+		{
+			DeleteObject(gApp.TabBodyBrush);
+			gApp.TabBodyBrush = NULL;
+		}
 		PostQuitMessage(0);
 		return 0;
 	default:
