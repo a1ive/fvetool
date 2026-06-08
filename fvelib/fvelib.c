@@ -106,6 +106,33 @@ typedef HRESULT(WINAPI* PFN_FveAuthElementFromRecoveryPasswordW)(LPCWSTR recover
 typedef HRESULT(WINAPI* PFN_FveIsRecoveryPasswordValidW)(LPCWSTR recoveryPassword, BOOL* isValid);
 typedef HRESULT(WINAPI* PFN_InternalFveIsVolumeEncrypted)(HANDLE volumeHandle);
 typedef BOOLEAN(WINAPI* PFN_RtlGenRandom)(PVOID randomBuffer, ULONG randomBufferLength);
+typedef HRESULT(WINAPI* PFN_FveSetAllowKeyExport)(BOOL allow);
+typedef HRESULT(WINAPI* PFN_FveGetAuthMethodGuids)(HANDLE volumeHandle, GUID* guids, UINT maxCount, UINT* count);
+typedef HRESULT(WINAPI* PFN_FveGetAuthMethodInformation)(HANDLE volumeHandle, void* information, SIZE_T bufferSize, SIZE_T* requiredSize);
+
+#define FVE_LIB_GET_PASSWORD_FLAGS 0x00080002u
+#define FVE_LIB_HRESULT_NOT_ACTIVATED ((HRESULT)0x80310008u)
+
+typedef struct FVE_KEY_AUTH_ELEMENT
+{
+	ULONG Size;
+	ULONG Version;
+	ULONG Flags;
+	ULONG Type;
+	BYTE Data[1];
+} FVE_KEY_AUTH_ELEMENT;
+
+typedef struct FVE_KEY_AUTH_INFORMATION
+{
+	ULONG Size;
+	ULONG Version;
+	ULONG Flags;
+	ULONG ElementsCount;
+	FVE_KEY_AUTH_ELEMENT** Elements;
+	PCWSTR Description;
+	FILETIME CreationTime;
+	GUID Guid;
+} FVE_KEY_AUTH_INFORMATION;
 
 typedef struct FVE_API
 {
@@ -130,6 +157,9 @@ typedef struct FVE_API
 	PFN_FveAuthElementFromRecoveryPasswordW AuthElementFromRecoveryPasswordW;
 	PFN_FveIsRecoveryPasswordValidW IsRecoveryPasswordValidW;
 	PFN_InternalFveIsVolumeEncrypted InternalFveIsVolumeEncrypted;
+	PFN_FveSetAllowKeyExport SetAllowKeyExport;
+	PFN_FveGetAuthMethodGuids GetAuthMethodGuids;
+	PFN_FveGetAuthMethodInformation GetAuthMethodInformation;
 } FVE_API;
 
 static FVE_API gFve;
@@ -875,6 +905,9 @@ HRESULT FveLibInit(void)
 	gFve.SetFveMethodEx = (PFN_FveSetFveMethodEx)GetProcAddress(gFve.ApiDll, "FveSetFveMethodEx");
 	gFve.IsRecoveryPasswordValidW = (PFN_FveIsRecoveryPasswordValidW)GetProcAddress(gFve.ApiDll, "FveIsRecoveryPasswordValidW");
 	gFve.InternalFveIsVolumeEncrypted = (PFN_InternalFveIsVolumeEncrypted)GetProcAddress(gFve.ApiDll, "InternalFveIsVolumeEncrypted");
+	gFve.SetAllowKeyExport = (PFN_FveSetAllowKeyExport)GetProcAddress(gFve.ApiDll, "FveSetAllowKeyExport");
+	gFve.GetAuthMethodGuids = (PFN_FveGetAuthMethodGuids)GetProcAddress(gFve.ApiDll, "FveGetAuthMethodGuids");
+	gFve.GetAuthMethodInformation = (PFN_FveGetAuthMethodInformation)GetProcAddress(gFve.ApiDll, "FveGetAuthMethodInformation");
 
 #if defined(_M_IX86)
 	(void)InstallX86WriteDiscoveryVolumeDataHook();
@@ -1370,4 +1403,215 @@ const char* FveLibLockStatusName(FVE_LIB_LOCK_STATUS status)
 	default:
 		return "Unknown";
 	}
+}
+
+const char* FveLibKeyProtectorTypeName(FVE_LIB_KEY_PROTECTOR_TYPE type)
+{
+	switch (type)
+	{
+	case FVE_LIB_KEY_PROTECTOR_RECOVERY_PASSWORD:
+		return "RecoveryPassword";
+	case FVE_LIB_KEY_PROTECTOR_PIN:
+		return "PIN";
+	case FVE_LIB_KEY_PROTECTOR_TPM:
+		return "TPM";
+	case FVE_LIB_KEY_PROTECTOR_EXTERNAL_KEY:
+		return "ExternalKey";
+	case FVE_LIB_KEY_PROTECTOR_PASSPHRASE:
+		return "Passphrase";
+	case FVE_LIB_KEY_PROTECTOR_CLEAR_KEY:
+		return "ClearKey";
+	case FVE_LIB_KEY_PROTECTOR_DPAPI_NG:
+		return "DPAPI-NG";
+	case FVE_LIB_KEY_PROTECTOR_NETWORK:
+		return "Network";
+	default:
+		return "Unknown";
+	}
+}
+
+static void DecodeRecoveryPasswordFromBytes(const BYTE* data, PWSTR output)
+{
+	for (size_t i = 0; i < 8; ++i)
+	{
+		DWORD block = (DWORD)data[i * 2 + 1];
+		block = block * 256u + (DWORD)data[i * 2];
+		block *= 11u;
+		WriteSixDigitGroup(block, &output[i * 7]);
+		if (i < 7)
+			output[i * 7 + 6] = L'-';
+	}
+	output[55] = L'\0';
+}
+
+HRESULT FveLibGetKeyProtectorsByHandle(HANDLE volumeHandle, FVE_LIB_KEY_PROTECTORS* protectors)
+{
+	HRESULT hr;
+	UINT guidCount = 0;
+	GUID* guids = NULL;
+	FVE_LIB_KEY_PROTECTOR_INFO* infos = NULL;
+
+	if (volumeHandle == NULL || protectors == NULL)
+		return E_INVALIDARG;
+
+	protectors->Count = 0;
+	protectors->Protectors = NULL;
+
+	if (gFve.GetAuthMethodGuids == NULL || gFve.GetAuthMethodInformation == NULL)
+		return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+	if (gFve.SetAllowKeyExport != NULL)
+		(void)gFve.SetAllowKeyExport(TRUE);
+
+	hr = gFve.GetAuthMethodGuids(volumeHandle, NULL, 0, &guidCount);
+	if (FAILED(hr) && guidCount == 0)
+		return hr;
+
+	guids = (GUID*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (SIZE_T)guidCount * sizeof(GUID));
+	if (guids == NULL)
+		return E_OUTOFMEMORY;
+
+	hr = gFve.GetAuthMethodGuids(volumeHandle, guids, guidCount, &guidCount);
+	if (FAILED(hr))
+	{
+		HeapFree(GetProcessHeap(), 0, guids);
+		return hr;
+	}
+
+	infos = (FVE_LIB_KEY_PROTECTOR_INFO*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+		(SIZE_T)guidCount * sizeof(FVE_LIB_KEY_PROTECTOR_INFO));
+	if (infos == NULL)
+	{
+		HeapFree(GetProcessHeap(), 0, guids);
+		return E_OUTOFMEMORY;
+	}
+
+	for (UINT i = 0; i < guidCount; ++i)
+	{
+		FVE_KEY_AUTH_INFORMATION authInfo;
+		FVE_KEY_AUTH_INFORMATION* pAuthInfo = NULL;
+		SIZE_T requiredSize = 0;
+
+		infos[i].ProtectorId = guids[i];
+		infos[i].HasRecoveryPassword = FALSE;
+		infos[i].RecoveryPassword[0] = L'\0';
+		infos[i].ElementCount = 0;
+
+		ZeroMemory(&authInfo, sizeof(authInfo));
+		authInfo.Size = sizeof(FVE_KEY_AUTH_INFORMATION);
+		authInfo.Version = 1;
+		authInfo.Flags = 1;
+		authInfo.Guid = guids[i];
+
+		hr = gFve.GetAuthMethodInformation(volumeHandle, &authInfo, sizeof(authInfo), &requiredSize);
+		if (FAILED(hr) && HRESULT_CODE(hr) != ERROR_INSUFFICIENT_BUFFER)
+			continue;
+
+		pAuthInfo = (FVE_KEY_AUTH_INFORMATION*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, requiredSize);
+		if (pAuthInfo == NULL)
+			continue;
+
+		pAuthInfo->Size = sizeof(FVE_KEY_AUTH_INFORMATION);
+		pAuthInfo->Version = 1;
+		pAuthInfo->Flags = 1;
+		pAuthInfo->Guid = guids[i];
+
+		hr = gFve.GetAuthMethodInformation(volumeHandle, pAuthInfo, requiredSize, &requiredSize);
+		if (FAILED(hr))
+		{
+			HeapFree(GetProcessHeap(), 0, pAuthInfo);
+			continue;
+		}
+
+		infos[i].ElementCount = pAuthInfo->ElementsCount;
+		if (infos[i].ElementCount > FVE_LIB_MAX_KEY_PROTECTOR_ELEMENTS)
+			infos[i].ElementCount = FVE_LIB_MAX_KEY_PROTECTOR_ELEMENTS;
+
+		for (DWORD j = 0; j < infos[i].ElementCount; ++j)
+		{
+			DWORD rawType = pAuthInfo->Elements[j]->Type;
+			infos[i].ElementTypes[j] = (FVE_LIB_KEY_PROTECTOR_TYPE)rawType;
+
+			if (rawType == 1 && !infos[i].HasRecoveryPassword)
+			{
+				FVE_KEY_AUTH_INFORMATION authInfo2;
+				FVE_KEY_AUTH_INFORMATION* pAuthInfo2 = NULL;
+				SIZE_T reqSize2 = 0;
+
+				ZeroMemory(&authInfo2, sizeof(authInfo2));
+				authInfo2.Size = sizeof(FVE_KEY_AUTH_INFORMATION);
+				authInfo2.Version = 1;
+				authInfo2.Flags = FVE_LIB_GET_PASSWORD_FLAGS;
+				authInfo2.Guid = guids[i];
+
+				hr = gFve.GetAuthMethodInformation(volumeHandle, &authInfo2, sizeof(authInfo2), &reqSize2);
+				if (FAILED(hr) && HRESULT_CODE(hr) != ERROR_INSUFFICIENT_BUFFER)
+					continue;
+
+				pAuthInfo2 = (FVE_KEY_AUTH_INFORMATION*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, reqSize2);
+				if (pAuthInfo2 == NULL)
+					continue;
+
+				pAuthInfo2->Size = sizeof(FVE_KEY_AUTH_INFORMATION);
+				pAuthInfo2->Version = 1;
+				pAuthInfo2->Flags = FVE_LIB_GET_PASSWORD_FLAGS;
+				pAuthInfo2->Guid = guids[i];
+
+				hr = gFve.GetAuthMethodInformation(volumeHandle, pAuthInfo2, reqSize2, &reqSize2);
+				if (SUCCEEDED(hr) && pAuthInfo2->ElementsCount > (ULONG)j)
+				{
+					DecodeRecoveryPasswordFromBytes(
+						pAuthInfo2->Elements[j]->Data,
+						infos[i].RecoveryPassword);
+					infos[i].HasRecoveryPassword = TRUE;
+				}
+				HeapFree(GetProcessHeap(), 0, pAuthInfo2);
+			}
+		}
+
+		HeapFree(GetProcessHeap(), 0, pAuthInfo);
+	}
+
+	HeapFree(GetProcessHeap(), 0, guids);
+	protectors->Count = guidCount;
+	protectors->Protectors = infos;
+	return S_OK;
+}
+
+HRESULT FveLibGetKeyProtectors(PCWSTR volumePath, FVE_LIB_KEY_PROTECTORS* protectors)
+{
+	HANDLE volumeHandle = NULL;
+	HRESULT hr;
+
+	if (protectors == NULL)
+		return E_INVALIDARG;
+
+	protectors->Count = 0;
+	protectors->Protectors = NULL;
+
+	hr = FveLibOpenVolume(volumePath, FVE_LIB_ACCESS_READ_ONLY, &volumeHandle);
+	if (FVE_LIB_FAILED(hr))
+		return hr;
+	if (volumeHandle == NULL || volumeHandle == INVALID_HANDLE_VALUE)
+		return E_HANDLE;
+
+	hr = FveLibGetKeyProtectorsByHandle(volumeHandle, protectors);
+	FveLibCloseVolume(volumeHandle);
+	return hr;
+}
+
+void FveLibFreeKeyProtectors(FVE_LIB_KEY_PROTECTORS* protectors)
+{
+	if (protectors == NULL)
+		return;
+
+	if (protectors->Protectors != NULL)
+	{
+		for (DWORD i = 0; i < protectors->Count; ++i)
+			SecureZeroMemory(protectors->Protectors[i].RecoveryPassword,
+				sizeof(protectors->Protectors[i].RecoveryPassword));
+		HeapFree(GetProcessHeap(), 0, protectors->Protectors);
+	}
+	protectors->Count = 0;
+	protectors->Protectors = NULL;
 }

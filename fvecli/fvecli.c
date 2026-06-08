@@ -34,6 +34,7 @@ static void PrintUsage(void)
 	printf("https://github.com/a1ive/fvetool\n");
 	printf("Usage:\n");
 	printf("  fvecli status <volume>\n");
+	printf("  fvecli keys <volume>\n");
 	printf("  fvecli unlock-password <volume> <password>\n");
 	printf("  fvecli unlock-recovery <volume> <recovery-password>\n");
 	printf("  fvecli lock <volume> [--dismount]\n");
@@ -43,6 +44,7 @@ static void PrintUsage(void)
 	printf("\n");
 	printf("Examples:\n");
 	printf("  fvecli status C:\n");
+	printf("  fvecli keys C:\n");
 	printf("  fvecli unlock-password D: my-password\n");
 	printf("  fvecli unlock-recovery D: 111111-222222-333333-444444-555555-666666-777777-888888\n");
 	printf("  fvecli encrypt M: my-password\n");
@@ -348,6 +350,64 @@ static int RunDecrypt(const char* volumeArg, const char* flagsArg)
 	return 0;
 }
 
+static int RunKeys(const char* volumeArg)
+{
+	PWSTR volume = NULL;
+	FVE_LIB_KEY_PROTECTORS protectors;
+	HRESULT hr;
+
+	hr = MbsToWide(volumeArg, &volume);
+	if (FAILED(hr))
+	{
+		PrintHr("MbsToWide(volume)", hr);
+		return 2;
+	}
+
+	hr = FveLibGetKeyProtectors(volume, &protectors);
+	FreeWide(volume);
+	if (FVE_LIB_FAILED(hr))
+	{
+		PrintHr("FveLibGetKeyProtectors", hr);
+		if ((DWORD)hr == 0x80070005u)
+			printf("Please run as administrator.\n");
+		return 2;
+	}
+
+	if (protectors.Count == 0)
+	{
+		printf("No key protectors found.\n");
+		FveLibFreeKeyProtectors(&protectors);
+		return 0;
+	}
+
+	for (DWORD i = 0; i < protectors.Count; ++i)
+	{
+		const FVE_LIB_KEY_PROTECTOR_INFO* info = &protectors.Protectors[i];
+		const GUID* g = &info->ProtectorId;
+		printf("KeyProtector[%lu]:\n", (unsigned long)(i + 1));
+		printf("  Id:   {%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}\n",
+			(unsigned long)g->Data1, g->Data2, g->Data3,
+			g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3],
+			g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
+		for (DWORD j = 0; j < info->ElementCount; ++j)
+		{
+			printf("  Type: %s (%lu)\n",
+				FveLibKeyProtectorTypeName(info->ElementTypes[j]),
+				(unsigned long)info->ElementTypes[j]);
+		}
+		if (info->HasRecoveryPassword)
+		{
+			printf("  RecoveryPassword: ");
+			PrintWideAscii(info->RecoveryPassword);
+			printf("\n");
+		}
+		printf("\n");
+	}
+
+	FveLibFreeKeyProtectors(&protectors);
+	return 0;
+}
+
 static int RunCommand(int argc, char* argv[])
 {
 	const char* command;
@@ -373,6 +433,15 @@ static int RunCommand(int argc, char* argv[])
 			return 1;
 		}
 		return RunStatus(argv[2]);
+	}
+	if (_stricmp(command, "keys") == 0)
+	{
+		if (argc != 3)
+		{
+			PrintUsage();
+			return 1;
+		}
+		return RunKeys(argv[2]);
 	}
 	if (_stricmp(command, "unlock-password") == 0)
 	{

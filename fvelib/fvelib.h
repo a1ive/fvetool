@@ -28,10 +28,39 @@
 #define FVE_LIB_HRESULT_IS_VOLUME_LOCKED(hr) ((DWORD)(HRESULT)(hr) == (DWORD)FVE_LIB_HRESULT_VOLUME_LOCKED)
 #define FVE_LIB_FAILED(hr) (FAILED(hr) && !FVE_LIB_HRESULT_IS_VOLUME_LOCKED(hr))
 #define FVE_LIB_RECOVERY_PASSWORD_CCH 56u
+#define FVE_LIB_MAX_KEY_PROTECTOR_ELEMENTS 16u
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef enum FVE_LIB_KEY_PROTECTOR_TYPE
+{
+	FVE_LIB_KEY_PROTECTOR_UNKNOWN = 0,
+	FVE_LIB_KEY_PROTECTOR_RECOVERY_PASSWORD = 1,
+	FVE_LIB_KEY_PROTECTOR_PIN = 2,
+	FVE_LIB_KEY_PROTECTOR_TPM = 3,
+	FVE_LIB_KEY_PROTECTOR_EXTERNAL_KEY = 4,
+	FVE_LIB_KEY_PROTECTOR_PASSPHRASE = 8,
+	FVE_LIB_KEY_PROTECTOR_CLEAR_KEY = 9,
+	FVE_LIB_KEY_PROTECTOR_DPAPI_NG = 10,
+	FVE_LIB_KEY_PROTECTOR_NETWORK = 11
+} FVE_LIB_KEY_PROTECTOR_TYPE;
+
+typedef struct FVE_LIB_KEY_PROTECTOR_INFO
+{
+	GUID ProtectorId;
+	DWORD ElementCount;
+	FVE_LIB_KEY_PROTECTOR_TYPE ElementTypes[FVE_LIB_MAX_KEY_PROTECTOR_ELEMENTS];
+	WCHAR RecoveryPassword[FVE_LIB_RECOVERY_PASSWORD_CCH];
+	BOOL HasRecoveryPassword;
+} FVE_LIB_KEY_PROTECTOR_INFO;
+
+typedef struct FVE_LIB_KEY_PROTECTORS
+{
+	DWORD Count;
+	FVE_LIB_KEY_PROTECTOR_INFO* Protectors;
+} FVE_LIB_KEY_PROTECTORS;
 
 typedef enum FVE_LIB_ACCESS_MODE
 {
@@ -112,7 +141,13 @@ const char* FveLibErrorName(HRESULT hr);
 const char* FveLibVolumeStatusName(FVE_LIB_VOLUME_STATUS status);
 const char* FveLibProtectionStatusName(FVE_LIB_PROTECTION_STATUS status);
 const char* FveLibLockStatusName(FVE_LIB_LOCK_STATUS status);
+const char* FveLibKeyProtectorTypeName(FVE_LIB_KEY_PROTECTOR_TYPE type);
+
+HRESULT FveLibGetKeyProtectors(PCWSTR volumePath, FVE_LIB_KEY_PROTECTORS* protectors);
+HRESULT FveLibGetKeyProtectorsByHandle(HANDLE volumeHandle, FVE_LIB_KEY_PROTECTORS* protectors);
+void FveLibFreeKeyProtectors(FVE_LIB_KEY_PROTECTORS* protectors);
 
 #ifdef __cplusplus
 }
 #endif
+
