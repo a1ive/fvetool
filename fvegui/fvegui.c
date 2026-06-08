@@ -40,6 +40,7 @@
 
 #define FVE_GUI_TAB_DECRYPT 0
 #define FVE_GUI_TAB_ENCRYPT 1
+#define FVE_GUI_TAB_VIEW 2
 
 #define IDC_TAB_CONTROL 1000
 #define IDC_VOLUME_COMBO 1001
@@ -59,6 +60,11 @@
 #define IDC_ENCRYPT_BUTTON 1024
 #define IDC_RECOVERY_KEY_EDIT 1025
 #define IDC_COPY_RECOVERY_BUTTON 1026
+#define IDC_VIEW_VOLUME_COMBO 1030
+#define IDC_VIEW_REFRESH_BUTTON 1031
+#define IDC_VIEW_PROTECTORS_TREE 1032
+#define IDC_VIEW_COPY_BUTTON 1033
+#define IDC_VIEW_RECOVERY_KEY_EDIT 1034
 
 typedef struct FVE_GUI_VOLUME_ENTRY
 {
@@ -77,6 +83,7 @@ typedef struct FVE_GUI_TEXT
 	WCHAR AppTitle[128];
 	WCHAR DecryptTab[64];
 	WCHAR EncryptTab[64];
+	WCHAR ViewTab[64];
 	WCHAR VolumeLabel[64];
 	WCHAR RefreshButton[64];
 	WCHAR SecretLabel[64];
@@ -88,6 +95,7 @@ typedef struct FVE_GUI_TEXT
 	WCHAR ConfirmPasswordLabel[64];
 	WCHAR EncryptButton[64];
 	WCHAR RecoveryKeyLabel[64];
+	WCHAR ViewProtectorsLabel[64];
 	WCHAR CopyButton[64];
 	WCHAR StatusLabel[64];
 } FVE_GUI_TEXT;
@@ -118,6 +126,14 @@ typedef struct FVE_GUI_APP
 	HWND RecoveryKeyLabel;
 	HWND RecoveryKeyEdit;
 	HWND CopyRecoveryButton;
+	HWND ViewVolumeLabel;
+	HWND ViewVolumeCombo;
+	HWND ViewRefreshButton;
+	HWND ViewProtectorsLabel;
+	HWND ViewProtectorsTree;
+	HWND ViewRecoveryKeyLabel;
+	HWND ViewRecoveryKeyEdit;
+	HWND ViewCopyRecoveryButton;
 	HWND StatusLabel;
 	HWND MessageStatic;
 	HFONT Font;
@@ -167,6 +183,7 @@ static void LoadGuiText(FVE_GUI_TEXT* text)
 	LOAD_TEXT(AppTitle, IDS_APP_TITLE, L"BitLocker Native GUI");
 	LOAD_TEXT(DecryptTab, IDS_DECRYPT_TAB, L"Decrypt");
 	LOAD_TEXT(EncryptTab, IDS_ENCRYPT_TAB, L"Encrypt");
+	LOAD_TEXT(ViewTab, IDS_VIEW_TAB, L"View");
 	LOAD_TEXT(VolumeLabel, IDS_VOLUME_LABEL, L"Volume:");
 	LOAD_TEXT(RefreshButton, IDS_REFRESH_BUTTON, L"Refresh");
 	LOAD_TEXT(SecretLabel, IDS_SECRET_LABEL, L"Unlock key:");
@@ -178,6 +195,7 @@ static void LoadGuiText(FVE_GUI_TEXT* text)
 	LOAD_TEXT(ConfirmPasswordLabel, IDS_CONFIRM_PASSWORD_LABEL, L"Confirm:");
 	LOAD_TEXT(EncryptButton, IDS_ENCRYPT_BUTTON, L"Turn on BitLocker");
 	LOAD_TEXT(RecoveryKeyLabel, IDS_RECOVERY_KEY_LABEL, L"Recovery key:");
+	LOAD_TEXT(ViewProtectorsLabel, IDS_VIEW_PROTECTORS_LABEL, L"Key protectors:");
 	LOAD_TEXT(CopyButton, IDS_COPY_BUTTON, L"Copy");
 	LOAD_TEXT(StatusLabel, IDS_STATUS_LABEL, L"Status:");
 
@@ -372,6 +390,8 @@ static void ParseStartupOptions(FVE_GUI_APP* app)
 
 	if (lstrcmpiW(argv[1], L"/encrypt") == 0)
 		app->StartupTab = FVE_GUI_TAB_ENCRYPT;
+	else if (lstrcmpiW(argv[1], L"/keys") == 0 || lstrcmpiW(argv[1], L"/view") == 0)
+		app->StartupTab = FVE_GUI_TAB_VIEW;
 	else if (lstrcmpiW(argv[1], L"/decrypt") == 0)
 		app->StartupTab = FVE_GUI_TAB_DECRYPT;
 	else {
@@ -562,6 +582,7 @@ static void UpdateButtons(FVE_GUI_APP* app)
 	BOOL passwordPresent = FALSE;
 	BOOL confirmPresent = FALSE;
 	BOOL recoveryPresent = FALSE;
+	BOOL viewRecoveryPresent = FALSE;
 
 	if (app->SecretEdit != NULL)
 		keyPresent = GetWindowTextLengthW(app->SecretEdit) > 0;
@@ -571,6 +592,8 @@ static void UpdateButtons(FVE_GUI_APP* app)
 		confirmPresent = GetWindowTextLengthW(app->EncryptConfirmEdit) > 0;
 	if (app->RecoveryKeyEdit != NULL)
 		recoveryPresent = GetWindowTextLengthW(app->RecoveryKeyEdit) > 0;
+	if (app->ViewRecoveryKeyEdit != NULL)
+		viewRecoveryPresent = GetWindowTextLengthW(app->ViewRecoveryKeyEdit) > 0;
 
 	EnableWindow(app->VolumeCombo, !app->Busy);
 	EnableWindow(app->RefreshButton, !app->Busy);
@@ -585,6 +608,9 @@ static void UpdateButtons(FVE_GUI_APP* app)
 	EnableWindow(app->EncryptConfirmEdit, !app->Busy);
 	EnableWindow(app->EncryptButton, !app->Busy && encryptVolume != NULL && passwordPresent && confirmPresent);
 	EnableWindow(app->CopyRecoveryButton, !app->Busy && recoveryPresent);
+	EnableWindow(app->ViewVolumeCombo, !app->Busy);
+	EnableWindow(app->ViewRefreshButton, !app->Busy);
+	EnableWindow(app->ViewCopyRecoveryButton, !app->Busy && viewRecoveryPresent);
 }
 
 static void SetBusy(FVE_GUI_APP* app, BOOL busy, PCWSTR message)
@@ -759,6 +785,11 @@ static BOOL GetSelectedEncryptPath(FVE_GUI_APP* app, PWSTR output, size_t cchOut
 	return GetSelectedPathFromCombo(app, app != NULL ? app->EncryptVolumeCombo : NULL, output, cchOutput);
 }
 
+static BOOL GetSelectedViewPath(FVE_GUI_APP* app, PWSTR output, size_t cchOutput)
+{
+	return GetSelectedPathFromCombo(app, app != NULL ? app->ViewVolumeCombo : NULL, output, cchOutput);
+}
+
 static int RepopulateVolumeCombo(
 	FVE_GUI_APP* app,
 	HWND combo,
@@ -822,11 +853,15 @@ static void SetReadyMessage(FVE_GUI_APP* app)
 
 	visibleCount = app->ActiveTab == FVE_GUI_TAB_ENCRYPT ?
 		GetComboItemCount(app->EncryptVolumeCombo) :
-		GetComboItemCount(app->VolumeCombo);
+		(app->ActiveTab == FVE_GUI_TAB_VIEW ?
+			GetComboItemCount(app->ViewVolumeCombo) :
+			GetComboItemCount(app->VolumeCombo));
 
 	if (visibleCount == 0)
 	{
 		if (app->ActiveTab == FVE_GUI_TAB_ENCRYPT)
+			SetMessage(app, LoadTempString(IDS_NO_DRIVES_FOUND, L"No volumes were found."));
+		else if (app->ActiveTab == FVE_GUI_TAB_VIEW)
 			SetMessage(app, LoadTempString(IDS_NO_DRIVES_FOUND, L"No volumes were found."));
 		else
 			SetMessage(app, LoadTempString(IDS_NO_VOLUMES_FOUND, L"No actionable BitLocker volumes were found."));
@@ -837,19 +872,25 @@ static void SetReadyMessage(FVE_GUI_APP* app)
 	}
 }
 
+static void RefreshViewKeys(FVE_GUI_APP* app);
+
 static void RefreshVolumes(FVE_GUI_APP* app, BOOL preserveSelection)
 {
 	WCHAR previousDecryptPath[4] = L"";
 	WCHAR previousEncryptPath[4] = L"";
+	WCHAR previousViewPath[4] = L"";
 	DWORD driveMask;
 
 	if (preserveSelection)
 	{
 		GetSelectedDecryptPath(app, previousDecryptPath, ARRAYSIZE(previousDecryptPath));
 		GetSelectedEncryptPath(app, previousEncryptPath, ARRAYSIZE(previousEncryptPath));
+		GetSelectedViewPath(app, previousViewPath, ARRAYSIZE(previousViewPath));
 	} else if (app != NULL && app->StartupVolumePath[0] != L'\0') {
 		if (app->StartupTab == FVE_GUI_TAB_ENCRYPT)
 			StringCchCopyW(previousEncryptPath, ARRAYSIZE(previousEncryptPath), app->StartupVolumePath);
+		else if (app->StartupTab == FVE_GUI_TAB_VIEW)
+			StringCchCopyW(previousViewPath, ARRAYSIZE(previousViewPath), app->StartupVolumePath);
 		else
 			StringCchCopyW(previousDecryptPath, ARRAYSIZE(previousDecryptPath), app->StartupVolumePath);
 	}
@@ -875,9 +916,16 @@ static void RefreshVolumes(FVE_GUI_APP* app, BOOL preserveSelection)
 		app->EncryptVolumeCombo,
 		previousEncryptPath[0] != L'\0' ? previousEncryptPath : NULL,
 		ShouldIncludeEncryptVolume);
+	RepopulateVolumeCombo(
+		app,
+		app->ViewVolumeCombo,
+		previousViewPath[0] != L'\0' ? previousViewPath : NULL,
+		ShouldIncludeDecryptVolume);
 	if (app != NULL)
 		app->StartupVolumePath[0] = L'\0';
 	RefreshStatusText(app);
+	if (app != NULL && app->ActiveTab == FVE_GUI_TAB_VIEW)
+		RefreshViewKeys(app);
 
 	SetBusy(app, FALSE, NULL);
 	SetReadyMessage(app);
@@ -1195,17 +1243,17 @@ static void RunEncrypt(FVE_GUI_APP* app)
 	SetMessage(app, LoadTempString(IDS_ENCRYPTION_STARTED, L"BitLocker encryption started. Save or copy the recovery key."));
 }
 
-static void CopyRecoveryKey(FVE_GUI_APP* app)
+static void CopyRecoveryKeyFromEdit(FVE_GUI_APP* app, HWND editControl)
 {
 	int length;
 	HGLOBAL memory;
 	PWSTR target;
 	WCHAR recoveryPassword[FVE_LIB_RECOVERY_PASSWORD_CCH];
 
-	if (app == NULL || app->RecoveryKeyEdit == NULL)
+	if (app == NULL || editControl == NULL)
 		return;
 
-	length = GetWindowTextW(app->RecoveryKeyEdit, recoveryPassword, ARRAYSIZE(recoveryPassword));
+	length = GetWindowTextW(editControl, recoveryPassword, ARRAYSIZE(recoveryPassword));
 	if (length <= 0)
 		return;
 
@@ -1252,6 +1300,119 @@ static void CopyRecoveryKey(FVE_GUI_APP* app)
 	SetMessage(app, LoadTempString(IDS_RECOVERY_KEY_COPIED, L"Recovery key copied."));
 }
 
+static void CopyRecoveryKey(FVE_GUI_APP* app)
+{
+	CopyRecoveryKeyFromEdit(app, app->RecoveryKeyEdit);
+}
+
+static void CopyViewRecoveryKey(FVE_GUI_APP* app)
+{
+	CopyRecoveryKeyFromEdit(app, app->ViewRecoveryKeyEdit);
+}
+
+static HTREEITEM InsertTreeItem(HWND tree, HTREEITEM parent, PWSTR text)
+{
+	TVINSERTSTRUCTW insert;
+	ZeroMemory(&insert, sizeof(insert));
+	insert.hParent = parent;
+	insert.hInsertAfter = TVI_LAST;
+	insert.item.mask = TVIF_TEXT;
+	insert.item.pszText = text;
+	return (HTREEITEM)SendMessageW(tree, TVM_INSERTITEMW, 0, (LPARAM)&insert);
+}
+
+static void RefreshViewKeys(FVE_GUI_APP* app)
+{
+	const FVE_GUI_VOLUME_ENTRY* volume = GetSelectedVolumeFromCombo(app, app->ViewVolumeCombo);
+	HRESULT hr;
+	FVE_LIB_KEY_PROTECTORS protectors;
+	WCHAR recoveryKey[FVE_LIB_RECOVERY_PASSWORD_CCH] = L"";
+
+	if (app == NULL || app->ViewProtectorsTree == NULL || app->ViewRecoveryKeyEdit == NULL)
+		return;
+
+	SendMessageW(app->ViewProtectorsTree, TVM_DELETEITEM, 0, (LPARAM)TVI_ROOT);
+	SetWindowTextW(app->ViewRecoveryKeyEdit, L"");
+
+	if (volume == NULL)
+	{
+		UpdateButtons(app);
+		return;
+	}
+
+	hr = FveLibGetKeyProtectors(volume->Path, &protectors);
+	if (FAILED(hr))
+	{
+		WCHAR errorMsg[512];
+		WCHAR detail[384];
+		FormatHRESULT(hr, detail, ARRAYSIZE(detail));
+		if ((DWORD)hr == 0x80070005u)
+		{
+			StringCchPrintfW(errorMsg, ARRAYSIZE(errorMsg), L"Error: %s (Please run as administrator)", detail);
+		}
+		else
+		{
+			StringCchPrintfW(errorMsg, ARRAYSIZE(errorMsg), L"Error: %s", detail);
+		}
+		InsertTreeItem(app->ViewProtectorsTree, TVI_ROOT, errorMsg);
+		UpdateButtons(app);
+		return;
+	}
+
+	if (protectors.Count == 0)
+	{
+		InsertTreeItem(app->ViewProtectorsTree, TVI_ROOT, L"No key protectors found.");
+		FveLibFreeKeyProtectors(&protectors);
+		UpdateButtons(app);
+		return;
+	}
+
+	for (DWORD i = 0; i < protectors.Count; ++i)
+	{
+		const FVE_LIB_KEY_PROTECTOR_INFO* info = &protectors.Protectors[i];
+		const GUID* g = &info->ProtectorId;
+		WCHAR text[256];
+		HTREEITEM root;
+
+		StringCchPrintfW(text, ARRAYSIZE(text), L"KeyProtector[%lu]", (unsigned long)(i + 1));
+		root = InsertTreeItem(app->ViewProtectorsTree, TVI_ROOT, text);
+
+		StringCchPrintfW(text, ARRAYSIZE(text),
+			L"Id: {%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+			(unsigned long)g->Data1, g->Data2, g->Data3,
+			g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3],
+			g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
+		InsertTreeItem(app->ViewProtectorsTree, root, text);
+
+		for (DWORD j = 0; j < info->ElementCount; ++j)
+		{
+			WCHAR typeNameW[128];
+			AsciiToWide(FveLibKeyProtectorTypeName(info->ElementTypes[j]), typeNameW, ARRAYSIZE(typeNameW));
+			StringCchPrintfW(text, ARRAYSIZE(text), L"Type: %s (%lu)",
+				typeNameW,
+				(unsigned long)info->ElementTypes[j]);
+			InsertTreeItem(app->ViewProtectorsTree, root, text);
+		}
+
+		if (info->HasRecoveryPassword)
+		{
+			StringCchPrintfW(text, ARRAYSIZE(text), L"Key: %s", info->RecoveryPassword);
+			InsertTreeItem(app->ViewProtectorsTree, root, text);
+
+			if (recoveryKey[0] == L'\0')
+			{
+				StringCchCopyW(recoveryKey, ARRAYSIZE(recoveryKey), info->RecoveryPassword);
+			}
+		}
+
+		SendMessageW(app->ViewProtectorsTree, TVM_EXPAND, TVE_EXPAND, (LPARAM)root);
+	}
+
+	SetWindowTextW(app->ViewRecoveryKeyEdit, recoveryKey);
+	FveLibFreeKeyProtectors(&protectors);
+	UpdateButtons(app);
+}
+
 static void ShowControl(HWND control, BOOL visible)
 {
 	if (control != NULL)
@@ -1262,12 +1423,14 @@ static void UpdateTabVisibility(FVE_GUI_APP* app)
 {
 	BOOL decryptVisible;
 	BOOL encryptVisible;
+	BOOL viewVisible;
 
 	if (app == NULL)
 		return;
 
 	decryptVisible = app->ActiveTab == FVE_GUI_TAB_DECRYPT;
 	encryptVisible = app->ActiveTab == FVE_GUI_TAB_ENCRYPT;
+	viewVisible = app->ActiveTab == FVE_GUI_TAB_VIEW;
 
 	ShowControl(app->VolumeLabel, decryptVisible);
 	ShowControl(app->VolumeCombo, decryptVisible);
@@ -1291,6 +1454,15 @@ static void UpdateTabVisibility(FVE_GUI_APP* app)
 	ShowControl(app->RecoveryKeyLabel, encryptVisible);
 	ShowControl(app->RecoveryKeyEdit, encryptVisible);
 	ShowControl(app->CopyRecoveryButton, encryptVisible);
+
+	ShowControl(app->ViewVolumeLabel, viewVisible);
+	ShowControl(app->ViewVolumeCombo, viewVisible);
+	ShowControl(app->ViewRefreshButton, viewVisible);
+	ShowControl(app->ViewProtectorsLabel, viewVisible);
+	ShowControl(app->ViewProtectorsTree, viewVisible);
+	ShowControl(app->ViewRecoveryKeyLabel, viewVisible);
+	ShowControl(app->ViewRecoveryKeyEdit, viewVisible);
+	ShowControl(app->ViewCopyRecoveryButton, viewVisible);
 }
 
 static void SetActiveTab(FVE_GUI_APP* app, int activeTab)
@@ -1298,7 +1470,7 @@ static void SetActiveTab(FVE_GUI_APP* app, int activeTab)
 	if (app == NULL)
 		return;
 
-	if (activeTab != FVE_GUI_TAB_ENCRYPT)
+	if (activeTab != FVE_GUI_TAB_ENCRYPT && activeTab != FVE_GUI_TAB_VIEW)
 		activeTab = FVE_GUI_TAB_DECRYPT;
 
 	app->ActiveTab = activeTab;
@@ -1307,6 +1479,8 @@ static void SetActiveTab(FVE_GUI_APP* app, int activeTab)
 	UpdateTabVisibility(app);
 	UpdateButtons(app);
 	SetReadyMessage(app);
+	if (activeTab == FVE_GUI_TAB_VIEW)
+		RefreshViewKeys(app);
 }
 
 static void AddTabItem(HWND tabControl, int index, PWSTR text)
@@ -1491,6 +1665,30 @@ static void LayoutControls(HWND window, FVE_GUI_APP* app)
 	MoveWindow(app->RecoveryKeyEdit, fieldLeft, recoveryTop, comboWidth, topRowHeight, TRUE);
 	MoveWindow(app->CopyRecoveryButton, rightColumnLeft, recoveryTop, recoveryWidth, topRowHeight, TRUE);
 
+	/* View Tab Layout */
+	MoveWindow(app->ViewVolumeLabel, pageLeft, top + ScaleForWindow(window, 3), labelWidth, topRowHeight, TRUE);
+	MoveWindow(app->ViewVolumeCombo, fieldLeft, top, comboWidth, ScaleForWindow(window, 220), TRUE);
+	{
+		RECT comboRect;
+		GetWindowRect(app->ViewVolumeCombo, &comboRect);
+		comboClosedHeight = comboRect.bottom - comboRect.top;
+	}
+	MoveWindow(app->ViewRefreshButton, rightColumnLeft, top, refreshWidth, comboClosedHeight, TRUE);
+
+	{
+		int protectorsTop = top + ScaleForWindow(window, 44);
+		int viewRecoveryTop = pageBottom - topRowHeight;
+		int protectorsHeight = viewRecoveryTop - protectorsTop - gap;
+		if (protectorsHeight < rowHeight)
+			protectorsHeight = rowHeight;
+
+		MoveWindow(app->ViewProtectorsLabel, pageLeft, protectorsTop + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
+		MoveWindow(app->ViewProtectorsTree, fieldLeft, protectorsTop, comboWidth, protectorsHeight, TRUE);
+		MoveWindow(app->ViewRecoveryKeyLabel, pageLeft, viewRecoveryTop + ScaleForWindow(window, 4), labelWidth, rowHeight, TRUE);
+		MoveWindow(app->ViewRecoveryKeyEdit, fieldLeft, viewRecoveryTop, comboWidth, topRowHeight, TRUE);
+		MoveWindow(app->ViewCopyRecoveryButton, rightColumnLeft, viewRecoveryTop, recoveryWidth, topRowHeight, TRUE);
+	}
+
 	MoveWindow(app->StatusLabel, contentLeft, messageTop + ScaleForWindow(window, 4), statusLabelWidth, rowHeight, TRUE);
 	MoveWindow(app->MessageStatic, contentLeft + statusLabelWidth, messageTop + ScaleForWindow(window, 4), contentWidth - statusLabelWidth, rowHeight, TRUE);
 	UpdateTabVisibility(app);
@@ -1504,6 +1702,7 @@ static BOOL CreateControls(FVE_GUI_APP* app)
 	{
 		AddTabItem(app->TabControl, FVE_GUI_TAB_DECRYPT, app->Text.DecryptTab);
 		AddTabItem(app->TabControl, FVE_GUI_TAB_ENCRYPT, app->Text.EncryptTab);
+		AddTabItem(app->TabControl, FVE_GUI_TAB_VIEW, app->Text.ViewTab);
 	}
 	app->VolumeLabel = CreateChildWindow(app, L"STATIC", app->Text.VolumeLabel, 0, 0, -1);
 	app->VolumeCombo = CreateChildWindow(app, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, IDC_VOLUME_COMBO);
@@ -1530,6 +1729,15 @@ static BOOL CreateControls(FVE_GUI_APP* app)
 	app->StatusLabel = CreateChildWindow(app, L"STATIC", app->Text.StatusLabel, 0, 0, IDC_STATUS_LABEL);
 	app->MessageStatic = CreateChildWindow(app, L"STATIC", L"", 0, 0, IDC_MESSAGE_STATIC);
 
+	app->ViewVolumeLabel = CreateChildWindow(app, L"STATIC", app->Text.VolumeLabel, 0, 0, -1);
+	app->ViewVolumeCombo = CreateChildWindow(app, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, IDC_VIEW_VOLUME_COMBO);
+	app->ViewRefreshButton = CreateChildWindow(app, L"BUTTON", app->Text.RefreshButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_VIEW_REFRESH_BUTTON);
+	app->ViewProtectorsLabel = CreateChildWindow(app, L"STATIC", app->Text.ViewProtectorsLabel, 0, 0, -1);
+	app->ViewProtectorsTree = CreateChildWindow(app, WC_TREEVIEWW, L"", TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_DISABLEDRAGDROP | WS_TABSTOP, WS_EX_CLIENTEDGE, IDC_VIEW_PROTECTORS_TREE);
+	app->ViewRecoveryKeyLabel = CreateChildWindow(app, L"STATIC", app->Text.RecoveryKeyLabel, 0, 0, -1);
+	app->ViewRecoveryKeyEdit = CreateChildWindow(app, L"EDIT", L"", ES_AUTOHSCROLL | ES_READONLY | WS_TABSTOP, WS_EX_CLIENTEDGE, IDC_VIEW_RECOVERY_KEY_EDIT);
+	app->ViewCopyRecoveryButton = CreateChildWindow(app, L"BUTTON", app->Text.CopyButton, BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_VIEW_COPY_BUTTON);
+
 	return app->TabControl != NULL &&
 		app->VolumeLabel != NULL &&
 		app->VolumeCombo != NULL &&
@@ -1552,6 +1760,14 @@ static BOOL CreateControls(FVE_GUI_APP* app)
 		app->RecoveryKeyLabel != NULL &&
 		app->RecoveryKeyEdit != NULL &&
 		app->CopyRecoveryButton != NULL &&
+		app->ViewVolumeLabel != NULL &&
+		app->ViewVolumeCombo != NULL &&
+		app->ViewRefreshButton != NULL &&
+		app->ViewProtectorsLabel != NULL &&
+		app->ViewProtectorsTree != NULL &&
+		app->ViewRecoveryKeyLabel != NULL &&
+		app->ViewRecoveryKeyEdit != NULL &&
+		app->ViewCopyRecoveryButton != NULL &&
 		app->StatusLabel != NULL &&
 		app->MessageStatic != NULL;
 }
@@ -1568,7 +1784,7 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 		app = (FVE_GUI_APP*)create->lpCreateParams;
 		app->MainWindow = window;
 		app->ActiveTab = app->StartupTab == FVE_GUI_TAB_ENCRYPT ?
-			FVE_GUI_TAB_ENCRYPT : FVE_GUI_TAB_DECRYPT;
+			FVE_GUI_TAB_ENCRYPT : (app->StartupTab == FVE_GUI_TAB_VIEW ? FVE_GUI_TAB_VIEW : FVE_GUI_TAB_DECRYPT);
 		SetWindowLongPtrW(window, GWLP_USERDATA, (LONG_PTR)app);
 		if (!CreateControls(app))
 			return -1;
@@ -1603,8 +1819,11 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 		if (app != NULL)
 		{
 			HWND control = (HWND)lParam;
-			if (control == app->RecoveryKeyEdit)
+			if (control == app->RecoveryKeyEdit ||
+				control == app->ViewRecoveryKeyEdit)
+			{
 				return (LRESULT)PrepareWindowControlBackground((HDC)wParam);
+			}
 			if (control == app->VolumeLabel ||
 				control == app->SecretLabel ||
 				control == app->RecoveryCheck ||
@@ -1612,7 +1831,10 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 				control == app->EncryptVolumeLabel ||
 				control == app->EncryptPasswordLabel ||
 				control == app->EncryptConfirmLabel ||
-				control == app->RecoveryKeyLabel)
+				control == app->RecoveryKeyLabel ||
+				control == app->ViewVolumeLabel ||
+				control == app->ViewProtectorsLabel ||
+				control == app->ViewRecoveryKeyLabel)
 			{
 				return (LRESULT)PrepareTabControlBackground((HDC)wParam, app->TabBodyBrush);
 			}
@@ -1632,7 +1854,8 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 			if (control == app->SecretEdit ||
 				control == app->EncryptPasswordEdit ||
 				control == app->EncryptConfirmEdit ||
-				control == app->RecoveryKeyEdit)
+				control == app->RecoveryKeyEdit ||
+				control == app->ViewRecoveryKeyEdit)
 			{
 				return (LRESULT)PrepareWindowControlBackground((HDC)wParam);
 			}
@@ -1651,7 +1874,12 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 				notify->code == TCN_SELCHANGE)
 			{
 				LRESULT selection = SendMessageW(app->TabControl, TCM_GETCURSEL, 0, 0);
-				SetActiveTab(app, selection == FVE_GUI_TAB_ENCRYPT ? FVE_GUI_TAB_ENCRYPT : FVE_GUI_TAB_DECRYPT);
+				int activeTab = FVE_GUI_TAB_DECRYPT;
+				if (selection == FVE_GUI_TAB_ENCRYPT)
+					activeTab = FVE_GUI_TAB_ENCRYPT;
+				else if (selection == FVE_GUI_TAB_VIEW)
+					activeTab = FVE_GUI_TAB_VIEW;
+				SetActiveTab(app, activeTab);
 				return 0;
 			}
 		}
@@ -1674,14 +1902,20 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 			if (HIWORD(wParam) == CBN_SELCHANGE)
 				RefreshStatusText(app);
 			return 0;
+		case IDC_VIEW_VOLUME_COMBO:
+			if (HIWORD(wParam) == CBN_SELCHANGE)
+				RefreshViewKeys(app);
+			return 0;
 		case IDC_ENCRYPT_PASSWORD_EDIT:
 		case IDC_ENCRYPT_CONFIRM_EDIT:
 		case IDC_RECOVERY_KEY_EDIT:
+		case IDC_VIEW_RECOVERY_KEY_EDIT:
 			if (HIWORD(wParam) == EN_CHANGE)
 				UpdateButtons(app);
 			return 0;
 		case IDC_REFRESH_BUTTON:
 		case IDC_ENCRYPT_REFRESH_BUTTON:
+		case IDC_VIEW_REFRESH_BUTTON:
 			RefreshVolumes(app, TRUE);
 			return 0;
 		case IDC_UNLOCK_BUTTON:
@@ -1699,6 +1933,9 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 		case IDC_COPY_RECOVERY_BUTTON:
 			CopyRecoveryKey(app);
 			return 0;
+		case IDC_VIEW_COPY_BUTTON:
+			CopyViewRecoveryKey(app);
+			return 0;
 		default:
 			break;
 		}
@@ -1707,6 +1944,15 @@ static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam,
 		ClearSecretEdit(&gApp);
 		ClearEncryptPasswordEdits(&gApp);
 		ClearRecoveryKeyEdit(&gApp);
+		if (gApp.ViewProtectorsTree != NULL)
+			SendMessageW(gApp.ViewProtectorsTree, TVM_DELETEITEM, 0, (LPARAM)TVI_ROOT);
+		if (gApp.ViewRecoveryKeyEdit != NULL)
+		{
+			WCHAR temp[FVE_LIB_RECOVERY_PASSWORD_CCH];
+			GetWindowTextW(gApp.ViewRecoveryKeyEdit, temp, ARRAYSIZE(temp));
+			SecureZeroMemory(temp, sizeof(temp));
+			SetWindowTextW(gApp.ViewRecoveryKeyEdit, L"");
+		}
 		if (gApp.TabBodyBrush != NULL)
 		{
 			DeleteObject(gApp.TabBodyBrush);
@@ -1777,7 +2023,7 @@ wWinMain(_In_ HINSTANCE hInstance,
 
 	ZeroMemory(&commonControls, sizeof(commonControls));
 	commonControls.dwSize = sizeof(commonControls);
-	commonControls.dwICC = ICC_TAB_CLASSES;
+	commonControls.dwICC = ICC_TAB_CLASSES | ICC_TREEVIEW_CLASSES;
 	InitCommonControlsEx(&commonControls);
 
 	ZeroMemory(&gApp, sizeof(gApp));

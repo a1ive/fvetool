@@ -27,7 +27,7 @@ BEGIN
             VALUE "InternalName", "fvegui"
             VALUE "OriginalFilename", "fvegui.exe"
             VALUE "ProductName", "FVEUnlocker"
-            VALUE "ProductVersion", "0.0.2.0"
+            VALUE "ProductVersion", "0.0.3.0"
             VALUE "LegalCopyright", "Copyright (c) 2026 A1ive"
         END
         BLOCK "080404B0"
@@ -37,7 +37,7 @@ BEGIN
             VALUE "InternalName", "fvegui"
             VALUE "OriginalFilename", "fvegui.exe"
             VALUE "ProductName", "FVEUnlocker"
-            VALUE "ProductVersion", "0.0.2.0"
+            VALUE "ProductVersion", "0.0.3.0"
             VALUE "LegalCopyright", "Copyright (c) 2026 A1ive"
         END
     END
@@ -67,6 +67,8 @@ BEGIN
     IDS_ENCRYPT_BUTTON "Turn on BitLocker"
     IDS_RECOVERY_KEY_LABEL "Recovery key:"
     IDS_COPY_BUTTON "Copy"
+    IDS_VIEW_TAB "View"
+    IDS_VIEW_PROTECTORS_LABEL "Key protectors:"
 END
 
 STRINGTABLE
@@ -169,6 +171,8 @@ BEGIN
     IDS_ENCRYPT_BUTTON "开启 BitLocker"
     IDS_RECOVERY_KEY_LABEL "恢复密钥:"
     IDS_COPY_BUTTON "复制"
+    IDS_VIEW_TAB "查看"
+    IDS_VIEW_PROTECTORS_LABEL "密码保护:"
 END
 
 STRINGTABLE
